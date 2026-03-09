@@ -1,0 +1,83 @@
+﻿:root {
+  --bg-1: #fff6e9;
+  --bg-2: #e8f7ff;
+  --card: #ffffffcc;
+  --ink: #25324a;
+  --accent-1: #ff7a59;
+  --accent-2: #3a86ff;
+  --accent-3: #00b894;
+}
+
+body {
+  background: radial-gradient(circle at 0% 0%, var(--bg-1) 0%, transparent 45%),
+    radial-gradient(circle at 100% 0%, #f2ecff 0%, transparent 42%),
+    linear-gradient(135deg, #edf9ff 0%, var(--bg-2) 45%, #f8faff 100%);
+  color: var(--ink);
+  min-height: 100vh;
+}
+
+h2 {
+  color: #1b2a49;
+  font-weight: 700;
+}
+
+.card {
+  border: 0;
+  border-radius: 16px;
+  background: var(--card);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 10px 30px rgba(25, 42, 70, 0.1);
+}
+
+.metric-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.metric-card::after {
+  content: "";
+  position: absolute;
+  inset: auto -40px -40px auto;
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  opacity: 0.25;
+}
+
+.metric-card.metric-orange::after {
+  background: var(--accent-1);
+}
+
+.metric-card.metric-blue::after {
+  background: var(--accent-2);
+}
+
+.btn-primary {
+  border: 0;
+  background: linear-gradient(135deg, var(--accent-1), #ff9f1c);
+}
+
+.btn-outline-primary {
+  border-color: var(--accent-2);
+  color: var(--accent-2);
+}
+
+.btn-outline-primary:hover {
+  background: var(--accent-2);
+  border-color: var(--accent-2);
+}
+
+.table thead th {
+  background: #eef4ff;
+  color: #274472;
+}
+
+.list-group-item {
+  background: transparent;
+  border-color: #dce8ff;
+}
+
+.chart-wrap {
+  position: relative;
+  min-height: 320px;
+}
