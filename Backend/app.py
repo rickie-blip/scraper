@@ -7,7 +7,7 @@ from sqlalchemy import func, inspect, text
 
 from Backend.database import db
 from Backend.models import Competitor, PriceHistory, Product
-from Scrapers.scraper import scrape_all_products, scrape_single_product
+from Scrapers.scraper import live_search_and_scrape, scrape_all_products, scrape_single_product
 
 
 def normalize_website_url(value: str) -> str:
@@ -272,6 +272,49 @@ def create_app():
                 "base_found": base_row is not None,
                 "category": category or None,
                 "rows": response_rows,
+            }
+        )
+
+    @app.post("/api/live-compare")
+    def live_compare():
+        data = request.get_json() or {}
+        product_name = (data.get("product_name") or "").strip()
+        base_competitor = (data.get("base_competitor") or "Vivo Fashion Group").strip()
+
+        if not product_name:
+            return jsonify({"error": "product_name is required"}), 400
+
+        competitors = Competitor.query.order_by(Competitor.name.asc()).all()
+        if not competitors:
+            return jsonify({"error": "no competitors configured"}), 400
+
+        results = []
+        for competitor in competitors:
+            results.append(live_search_and_scrape(competitor.name, competitor.website, product_name))
+
+        successful = [r for r in results if r.get("success")]
+        base_row = next((r for r in successful if r["competitor"].lower() == base_competitor.lower()), None)
+        base_price = base_row["price"] if base_row else None
+
+        for row in successful:
+            if base_price is None:
+                row["delta_vs_vivo"] = None
+                row["delta_pct_vs_vivo"] = None
+            else:
+                delta = round(row["price"] - base_price, 2)
+                row["delta_vs_vivo"] = delta
+                row["delta_pct_vs_vivo"] = None if base_price == 0 else round((delta / base_price) * 100, 2)
+
+        successful.sort(key=lambda r: r["price"])
+        failed = [r for r in results if not r.get("success")]
+
+        return jsonify(
+            {
+                "query": product_name,
+                "base_competitor": base_competitor,
+                "base_found": base_row is not None,
+                "matches": successful,
+                "failed": failed,
             }
         )
 

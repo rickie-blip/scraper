@@ -25,6 +25,13 @@ export default function App() {
   });
   const [comparison, setComparison] = useState(null);
 
+  const [liveForm, setLiveForm] = useState({
+    product_name: "",
+    base_competitor: "Vivo Fashion Group",
+  });
+  const [liveResult, setLiveResult] = useState(null);
+  const [liveLoading, setLiveLoading] = useState(false);
+
   function normalizeWebsiteUrl(value) {
     const trimmed = (value || "").trim();
     if (!trimmed) return "";
@@ -149,6 +156,20 @@ export default function App() {
     }
   }
 
+  async function onLiveCompare(e) {
+    e.preventDefault();
+    setError("");
+    setLiveLoading(true);
+    try {
+      const result = await api.liveCompare(liveForm);
+      setLiveResult(result);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLiveLoading(false);
+    }
+  }
+
   return (
     <div className="container py-4">
       <h2 className="mb-4">Competitor Price Tracker</h2>
@@ -167,6 +188,101 @@ export default function App() {
           <div className="card p-3 shadow-sm metric-card metric-blue">
             <div className="text-muted">Total Tracked Products</div>
             <div className="display-6">{summary.total_products}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="row g-3 mb-3">
+        <div className="col-12">
+          <div className="card p-3 shadow-sm">
+            <h5 className="mb-3">Live Product Pull: Vivo Shopify vs Competitors</h5>
+            <form className="row g-2 mb-2" onSubmit={onLiveCompare}>
+              <div className="col-md-4">
+                <input
+                  className="form-control"
+                  placeholder="Product name from Vivo Shopify"
+                  value={liveForm.product_name}
+                  onChange={(e) => setLiveForm((s) => ({ ...s, product_name: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="col-md-4">
+                <input
+                  className="form-control"
+                  placeholder="Base competitor"
+                  value={liveForm.base_competitor}
+                  onChange={(e) => setLiveForm((s) => ({ ...s, base_competitor: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="col-md-4 d-grid">
+                <button className="btn btn-primary" disabled={liveLoading} type="submit">
+                  {liveLoading ? "Searching..." : "Pull and Compare"}
+                </button>
+              </div>
+            </form>
+
+            {liveResult && (
+              <>
+                {!liveResult.base_found && (
+                  <div className="alert alert-warning py-2">
+                    Base competitor match not found for this query. Deltas are unavailable.
+                  </div>
+                )}
+                <div className="table-responsive">
+                  <table className="table table-sm align-middle">
+                    <thead>
+                      <tr>
+                        <th>Competitor</th>
+                        <th>Matched Product</th>
+                        <th>Price</th>
+                        <th>Delta vs Vivo</th>
+                        <th>Delta %</th>
+                        <th>URL</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {liveResult.matches.map((row) => (
+                        <tr key={row.competitor}>
+                          <td>{row.competitor}</td>
+                          <td>{row.product_name}</td>
+                          <td>{row.price}</td>
+                          <td className={row.delta_vs_vivo > 0 ? "text-danger" : row.delta_vs_vivo < 0 ? "text-success" : ""}>
+                            {row.delta_vs_vivo ?? "-"}
+                          </td>
+                          <td className={row.delta_pct_vs_vivo > 0 ? "text-danger" : row.delta_pct_vs_vivo < 0 ? "text-success" : ""}>
+                            {row.delta_pct_vs_vivo != null ? `${row.delta_pct_vs_vivo}%` : "-"}
+                          </td>
+                          <td>
+                            {row.product_url ? (
+                              <a href={row.product_url} rel="noreferrer" target="_blank">Open</a>
+                            ) : (
+                              "-"
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                      {!liveResult.matches.length && (
+                        <tr>
+                          <td className="text-muted" colSpan="6">No matches found.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {!!liveResult.failed?.length && (
+                  <details className="mt-2">
+                    <summary>Failed competitors ({liveResult.failed.length})</summary>
+                    <ul className="mb-0 mt-2">
+                      {liveResult.failed.map((f) => (
+                        <li key={`${f.competitor}-${f.error}`}>{f.competitor}: {f.error}</li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </>
+            )}
           </div>
         </div>
       </div>

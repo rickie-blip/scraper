@@ -28,4 +28,5 @@ export const api = {
     if (category) params.set("category", category);
     return request(`/comparison?${params.toString()}`);
   },
+  liveCompare: (payload) => request("/live-compare", { method: "POST", body: JSON.stringify(payload) }),
 };

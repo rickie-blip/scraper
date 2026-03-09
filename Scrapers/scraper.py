@@ -1,5 +1,6 @@
 ﻿import re
 from decimal import Decimal, InvalidOperation
+from urllib.parse import quote_plus, urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -15,6 +16,11 @@ PRICE_SELECTORS = [
     ".price",
     "[class*='price']",
 ]
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; CompetitorTracker/1.0)",
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
 
 def _normalize_price(value: str):
@@ -54,12 +60,47 @@ def _extract_price(html: str):
     return None
 
 
+def _extract_title(html: str):
+    soup = BeautifulSoup(html, "html.parser")
+    for selector in ["meta[property='og:title']", "meta[name='twitter:title']", "h1", "title"]:
+        node = soup.select_one(selector)
+        if node:
+            value = node.get("content") or node.get_text(" ", strip=True)
+            if value:
+                return value.strip()
+    return None
+
+
+def _find_product_link(search_html: str, base_url: str):
+    soup = BeautifulSoup(search_html, "html.parser")
+    for link in soup.select("a[href]"):
+        href = (link.get("href") or "").strip()
+        if not href:
+            continue
+        absolute = urljoin(base_url, href)
+        if "/products/" in absolute:
+            return absolute
+    return None
+
+
+def _search_product_url(base_url: str, query: str):
+    search_paths = [
+        f"/search?q={quote_plus(query)}&type=product",
+        f"/search?q={quote_plus(query)}",
+    ]
+    for path in search_paths:
+        url = urljoin(base_url, path)
+        response = requests.get(url, headers=HEADERS, timeout=20)
+        if response.status_code >= 400:
+            continue
+        candidate = _find_product_link(response.text, base_url)
+        if candidate:
+            return candidate
+    return None
+
+
 def _fetch_product_price(url: str):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; CompetitorTracker/1.0)",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
-    response = requests.get(url, headers=headers, timeout=20)
+    response = requests.get(url, headers=HEADERS, timeout=20)
     response.raise_for_status()
     return _extract_price(response.text)
 
@@ -104,6 +145,43 @@ def scrape_all_products():
         "failed": sum(1 for r in results if not r["success"]),
         "results": results,
     }
+
+
+def live_search_and_scrape(competitor_name: str, website: str, query: str):
+    try:
+        product_url = _search_product_url(website, query)
+        if not product_url:
+            return {
+                "success": False,
+                "competitor": competitor_name,
+                "error": "no product match found",
+            }
+
+        page = requests.get(product_url, headers=HEADERS, timeout=20)
+        page.raise_for_status()
+        price = _extract_price(page.text)
+        title = _extract_title(page.text) or query
+        if price is None:
+            return {
+                "success": False,
+                "competitor": competitor_name,
+                "product_url": product_url,
+                "error": "price not found",
+            }
+
+        return {
+            "success": True,
+            "competitor": competitor_name,
+            "product_name": title,
+            "product_url": product_url,
+            "price": float(price),
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "competitor": competitor_name,
+            "error": str(exc),
+        }
 
 
 def main():
