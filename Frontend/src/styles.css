@@ -57,30 +57,24 @@ h1 {
   max-width: 540px;
 }
 
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
+.top-nav {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.top-nav a {
+  text-decoration: none;
+  color: var(--ink);
+  padding: 8px 14px;
   border-radius: 999px;
-  background: rgba(17, 23, 34, 0.04);
+  background: rgba(17, 23, 34, 0.06);
   font-weight: 600;
 }
 
-.dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #facc15;
-  display: inline-block;
-}
-
-.dot.ok {
-  background: var(--accent-3);
-}
-
-.dot.err {
-  background: #ef4444;
+.top-nav a.active {
+  background: linear-gradient(135deg, var(--accent), #ffa24b);
+  color: #fff;
 }
 
 .panel {
@@ -115,6 +109,27 @@ h1 {
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 12px;
   align-items: center;
+}
+
+.row-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.table-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .metrics {
@@ -156,6 +171,29 @@ h1 {
   box-shadow: var(--shadow);
 }
 
+.home-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.home-card {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.home-title {
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
 .btn-primary {
   border: 0;
   background: linear-gradient(135deg, var(--accent), #ffa24b);
@@ -185,27 +223,6 @@ h1 {
   box-shadow: 0 6px 14px rgba(17, 23, 34, 0.12);
 }
 
-.script-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
-}
-
-.script-card {
-  background: #ffffff;
-  padding: 14px 16px;
-  border-radius: 14px;
-  border: 1px solid rgba(17, 23, 34, 0.08);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 0.92rem;
-}
-
-.script-card span {
-  color: var(--muted);
-}
-
 .chart-wrap {
   position: relative;
   min-height: 320px;
@@ -213,6 +230,12 @@ h1 {
 
 @media (max-width: 768px) {
   .hero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .row-actions,
+  .table-actions {
     flex-direction: column;
     align-items: flex-start;
   }
