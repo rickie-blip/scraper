@@ -22,6 +22,12 @@ export const api = {
   getSummary: () => apiRequest("/dashboard/summary"),
   getCompetitors: () => apiRequest("/competitors"),
   addCompetitor: (payload) => apiRequest("/competitors", { method: "POST", body: JSON.stringify(payload) }),
+  updateCompetitor: (id, payload) =>
+    apiRequest(`/competitors/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  deleteCompetitor: (id) => apiRequest(`/competitors/${id}`, { method: "DELETE" }),
+  searchCompetitor: (id, query) =>
+    apiRequest(`/competitors/${id}/search?q=${encodeURIComponent(query)}`),
+  getSearchPresets: (id) => apiRequest(`/competitors/${id}/presets`),
   getProducts: () => apiRequest("/products"),
   addProduct: (payload) => apiRequest("/products", { method: "POST", body: JSON.stringify(payload) }),
   scrapeProduct: (productId) => apiRequest(`/products/${productId}/scrape`, { method: "POST" }),
@@ -34,6 +40,12 @@ export const api = {
     return apiRequest(`/comparison?${params.toString()}`);
   },
   liveCompare: (payload) => apiRequest("/live-compare", { method: "POST", body: JSON.stringify(payload) }),
+  scrapeCollection: ({ url, currency }) => {
+    const params = new URLSearchParams();
+    if (url) params.set("url", url);
+    if (currency) params.set("currency", currency);
+    return apiRequest(`/collections/scrape?${params.toString()}`);
+  },
 
   searchVivoBodycons: (q) => publicRequest(`/search-vivo-bodycons?q=${encodeURIComponent(q)}`),
   searchNalaniBodycons: (q) => publicRequest(`/search-nalani-bodycons?q=${encodeURIComponent(q)}`),

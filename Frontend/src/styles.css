@@ -228,6 +228,76 @@ h1 {
   min-height: 320px;
 }
 
+.chatbot-shell {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 999;
+}
+
+.chatbot-fab {
+  border: 0;
+  border-radius: 999px;
+  padding: 0;
+  width: 56px;
+  height: 56px;
+  background: #fff;
+  box-shadow: var(--shadow);
+  display: grid;
+  place-items: center;
+}
+
+.chatbot-fab img {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
+
+.chatbot-panel {
+  position: fixed;
+  right: 24px;
+  bottom: 90px;
+  width: min(380px, 92vw);
+  max-height: 70vh;
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  display: grid;
+  grid-template-rows: auto auto auto 1fr;
+  gap: 12px;
+  padding: 16px;
+}
+
+.chatbot-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.chatbot-sub {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.chatbot-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+}
+
+.chatbot-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chatbot-output {
+  overflow: auto;
+  padding-right: 4px;
+}
+
 @media (max-width: 768px) {
   .hero {
     flex-direction: column;
@@ -238,5 +308,11 @@ h1 {
   .table-actions {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .chatbot-panel {
+    left: 12px;
+    right: 12px;
+    width: auto;
   }
 }

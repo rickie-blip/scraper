@@ -3,7 +3,7 @@ import { Chart, LineController, LineElement, PointElement, LinearScale, Category
 
 Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Tooltip, Legend, Filler);
 
-export default function PriceChart({ points, productName }) {
+export default function PriceChart({ points, productName, currency = "USD" }) {
   const canvasRef = useRef(null);
   const chartRef = useRef(null);
 
@@ -16,6 +16,12 @@ export default function PriceChart({ points, productName }) {
 
     const labels = points.map((p) => new Date(p.collected_at).toLocaleString());
     const prices = points.map((p) => p.price);
+    const normalizedCurrency = String(currency || "").trim().toUpperCase();
+    const safeCurrency = /^[A-Z]{3}$/.test(normalizedCurrency) ? normalizedCurrency : "USD";
+    const currencyFormatter = new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: safeCurrency,
+    });
 
     chartRef.current = new Chart(canvasRef.current, {
       type: "line",
@@ -35,13 +41,30 @@ export default function PriceChart({ points, productName }) {
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        scales: {
+          y: {
+            ticks: {
+              callback: (value) => currencyFormatter.format(value),
+            },
+          },
+        },
+        plugins: {
+          tooltip: {
+            callbacks: {
+              label: (context) => {
+                const value = context.parsed?.y ?? context.raw;
+                return `${context.dataset.label}: ${currencyFormatter.format(value)}`;
+              },
+            },
+          },
+        },
       },
     });
 
     return () => {
       if (chartRef.current) chartRef.current.destroy();
     };
-  }, [points, productName]);
+  }, [points, productName, currency]);
 
   if (!points.length) {
     return <div className="text-muted">No price history for selected product.</div>;

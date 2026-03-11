@@ -18,9 +18,13 @@ export default function HomePage() {
           <span className="home-title">Collection Scrapers</span>
           <span>Pull full product lists from collection endpoints.</span>
         </Link>
-        <Link to="/tracker" className="home-card">
+        <Link to="/competitors" className="home-card">
           <span className="home-title">Competitor Tracker</span>
           <span>Manage competitors, products, scraping, and analytics.</span>
+        </Link>
+        <Link to="/bot" className="home-card">
+          <span className="home-title">Command Bot</span>
+          <span>Run safe commands to search and scrape in real time.</span>
         </Link>
       </div>
     </div>

@@ -2,112 +2,78 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { downloadCsv } from "../utils/csv";
 
-const SEARCH_TARGETS = [
-  {
-    key: "vivo-bodycons",
-    label: "Shopzetu Vivo Bodycons",
-    route: "/search-vivo-bodycons",
-    defaultQuery: "bodycons",
-    run: api.searchVivoBodycons,
-  },
-  {
-    key: "nalani-bodycons",
-    label: "Nalani Bodycons",
-    route: "/search-nalani-bodycons",
-    defaultQuery: "bodycons",
-    run: api.searchNalaniBodycons,
-  },
-  {
-    key: "neviive-bodycons",
-    label: "Neviive Bodycons",
-    route: "/search-neviive-bodycons",
-    defaultQuery: "bodycons",
-    run: api.searchNeviiveBodycons,
-  },
-  {
-    key: "dirac-bodycons",
-    label: "Dirac Fashion Bodycons",
-    route: "/search-dirac-bodycons",
-    defaultQuery: "bodycons",
-    run: api.searchDiracBodycons,
-  },
-  {
-    key: "vivo-bodysuits",
-    label: "Shopzetu Vivo Bodysuits",
-    route: "/search-vivo-bodysuits",
-    defaultQuery: "bodysuits",
-    run: api.searchVivoBodysuits,
-  },
-  {
-    key: "nalani-bodysuits",
-    label: "Nalani Bodysuits",
-    route: "/search-nalani-bodysuits",
-    defaultQuery: "bodysuits",
-    run: api.searchNalaniBodysuits,
-  },
-  {
-    key: "neviive-bodysuits",
-    label: "Neviive Bodysuits",
-    route: "/search-neviive-bodysuits",
-    defaultQuery: "bodysuits",
-    run: api.searchNeviiveBodysuits,
-  },
-  {
-    key: "dirac-bodysuits",
-    label: "Dirac Fashion Bodysuits",
-    route: "/search-dirac-bodysuits",
-    defaultQuery: "bodysuits",
-    run: api.searchDiracBodysuits,
-  },
-  {
-    key: "vivo-dresses",
-    label: "Shopzetu Vivo Dresses",
-    route: "/search-vivo-dresses",
-    defaultQuery: "dresses",
-    run: api.searchVivoDresses,
-  },
-  {
-    key: "nalani-dresses",
-    label: "Nalani Dresses",
-    route: "/search-nalani-dresses",
-    defaultQuery: "dresses",
-    run: api.searchNalaniDresses,
-  },
-  {
-    key: "neviive-dresses",
-    label: "Neviive Dresses",
-    route: "/search-neviive-dresses",
-    defaultQuery: "dresses",
-    run: api.searchNeviiveDresses,
-  },
-  {
-    key: "dirac-dresses",
-    label: "Dirac Fashion Dresses",
-    route: "/search-dirac-dresses",
-    defaultQuery: "dresses",
-    run: api.searchDiracDresses,
-  },
-];
+function normalizeCurrency(value) {
+  const normalized = String(value || "").trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(normalized) ? normalized : "USD";
+}
 
-function formatPrice(value) {
+function formatPrice(value, currency = "USD") {
   if (value == null || value === "") return "-";
-  return typeof value === "number" ? `$${value}` : String(value);
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) return String(value);
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: normalizeCurrency(currency),
+  }).format(numberValue);
 }
 
 export default function SearchPage() {
-  const [searchTarget, setSearchTarget] = useState(SEARCH_TARGETS[0].key);
-  const [searchQuery, setSearchQuery] = useState(SEARCH_TARGETS[0].defaultQuery);
+  const [competitors, setCompetitors] = useState([]);
+  const [searchCompetitorId, setSearchCompetitorId] = useState("");
+  const [presets, setPresets] = useState([]);
+  const [presetKey, setPresetKey] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchResult, setSearchResult] = useState(null);
   const [searchError, setSearchError] = useState("");
 
-  const target = SEARCH_TARGETS.find((t) => t.key === searchTarget) || SEARCH_TARGETS[0];
+  useEffect(() => {
+    let active = true;
+    api
+      .getCompetitors()
+      .then((data) => {
+        if (!active) return;
+        setCompetitors(data);
+        if (data.length) {
+          setSearchCompetitorId(String(data[0].id));
+        }
+      })
+      .catch((err) => {
+        if (!active) return;
+        setSearchError(err.message);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
-    setSearchQuery(target.defaultQuery);
-    setSearchResult(null);
-    setSearchError("");
-  }, [target.key]);
+    if (!searchCompetitorId) return;
+    let active = true;
+    api
+      .getSearchPresets(searchCompetitorId)
+      .then((data) => {
+        if (!active) return;
+        const list = Array.isArray(data.presets) ? data.presets : [];
+        setPresets(list);
+        if (list.length) {
+          setPresetKey(list[0]);
+          setSearchQuery(list[0]);
+        }
+      })
+      .catch((err) => {
+        if (!active) return;
+        setSearchError(err.message);
+      });
+    return () => {
+      active = false;
+    };
+  }, [searchCompetitorId]);
+
+  useEffect(() => {
+    if (!presetKey) return;
+    setSearchQuery(presetKey);
+  }, [presetKey]);
 
   async function onSearchSubmit(e) {
     e.preventDefault();
@@ -115,7 +81,7 @@ export default function SearchPage() {
     setSearchError("");
     setSearchResult(null);
     try {
-      const res = await target.run(searchQuery);
+      const res = await api.searchCompetitor(searchCompetitorId, searchQuery);
       setSearchResult(res);
     } catch (err) {
       setSearchError(err.message);
@@ -133,7 +99,7 @@ export default function SearchPage() {
       image: item.image,
       url: item.url,
     }));
-    downloadCsv(`search-${target.key}.csv`, rows);
+    downloadCsv(`search-${searchCompetitorId || "competitor"}.csv`, rows);
   }
 
   return (
@@ -141,14 +107,33 @@ export default function SearchPage() {
       <div className="panel-head">
         <div>
           <h2>Shopify Search Console</h2>
-          <p>Directly calls the backend search routes for quick product snapshots.</p>
+          <p>Search any competitor that you have added in the tracker.</p>
         </div>
       </div>
       <form className="grid-row" onSubmit={onSearchSubmit}>
-        <select className="form-select" value={searchTarget} onChange={(e) => setSearchTarget(e.target.value)}>
-          {SEARCH_TARGETS.map((item) => (
-            <option key={item.key} value={item.key}>
-              {item.label} ({item.route})
+        <select
+          className="form-select"
+          value={presetKey}
+          onChange={(e) => setPresetKey(e.target.value)}
+          disabled={!presets.length}
+        >
+          {!presets.length && <option value="">No presets</option>}
+          {presets.map((item) => (
+            <option key={item} value={item}>
+              {item}
+            </option>
+          ))}
+        </select>
+        <select
+          className="form-select"
+          value={searchCompetitorId}
+          onChange={(e) => setSearchCompetitorId(e.target.value)}
+          required
+        >
+          <option value="">Select competitor...</option>
+          {competitors.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name}
             </option>
           ))}
         </select>
@@ -156,15 +141,20 @@ export default function SearchPage() {
           className="form-control"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search keyword"
+          placeholder="Search keyword or category"
+          required
         />
-        <button className="btn btn-primary" type="submit" disabled={searchLoading}>
+        <button
+          className="btn btn-primary"
+          type="submit"
+          disabled={searchLoading || !searchCompetitorId}
+        >
           {searchLoading ? "Searching..." : "Run Search"}
         </button>
       </form>
 
       <div className="row-actions">
-        <span className="muted">Endpoint: {target.route}</span>
+        <span className="muted">Endpoint: /api/competitors/:id/search</span>
         <button className="btn btn-outline-primary btn-sm" onClick={exportResults} disabled={!searchResult?.data?.length}>
           Export CSV
         </button>
@@ -191,7 +181,7 @@ export default function SearchPage() {
                   </td>
                   <td>{item.title}</td>
                   <td>{item.brand}</td>
-                  <td>{formatPrice(item.price)}</td>
+                  <td>{formatPrice(item.price, item.currency)}</td>
                   <td>
                     {item.url ? (
                       <a href={item.url} rel="noreferrer" target="_blank">

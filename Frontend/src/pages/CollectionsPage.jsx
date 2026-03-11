@@ -2,56 +2,94 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { downloadCsv } from "../utils/csv";
 
-const COLLECTION_TARGETS = [
+const COLLECTION_PRESETS = [
   {
-    key: "vivo-dresses-collection",
-    label: "Vivo Dresses Collection (Shopzetu)",
-    route: "/scrape-vivo-dresses-collection",
-    defaultUrl: "https://pay.shopzetu.com/collections/dresses",
-    run: api.scrapeVivoDressesCollection,
+    key: "shopzetu-dresses",
+    label: "Shopzetu Dresses",
+    url: "https://pay.shopzetu.com/collections/dresses",
+    currency: "KES",
   },
   {
-    key: "neviive-dresses-collection",
-    label: "Neviive Dresses Collection",
-    route: "/scrape-neviive-dresses-collection",
-    defaultUrl: "https://www.neviive.com/collections/dresses",
-    run: api.scrapeNeviiveDressesCollection,
+    key: "neviive-dresses",
+    label: "Neviive Dresses",
+    url: "https://www.neviive.com/collections/dresses",
+    currency: "KES",
+  },
+  {
+    key: "nalani-dresses",
+    label: "Nalani Dresses",
+    url: "https://nalaniwomen.com/collections/dresses",
+    currency: "KES",
   },
   {
     key: "ikojn-dresses",
-    label: "Ikojn Dresses Collection",
-    route: "/ikojn-dresses",
-    defaultUrl: "https://www.ikojn.com/collections/dresses",
-    run: api.ikojnDresses,
-  },
-  {
-    key: "nalani-dresses-collection",
-    label: "Nalani Dresses Collection",
-    route: "/nalani-dresses-collection",
-    defaultUrl: "https://nalaniwomen.com/collections/dresses",
-    run: api.nalaniDressesCollection,
+    label: "Ikojn Dresses",
+    url: "https://www.ikojn.com/collections/dresses",
+    currency: "KES",
   },
 ];
 
-function formatPrice(value) {
+function normalizeCurrency(value) {
+  const normalized = String(value || "").trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(normalized) ? normalized : "USD";
+}
+
+function formatPrice(value, currency = "USD") {
   if (value == null || value === "") return "-";
-  return typeof value === "number" ? `$${value}` : String(value);
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) return String(value);
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: normalizeCurrency(currency),
+  }).format(numberValue);
 }
 
 export default function CollectionsPage() {
-  const [collectionTarget, setCollectionTarget] = useState(COLLECTION_TARGETS[0].key);
-  const [collectionUrl, setCollectionUrl] = useState(COLLECTION_TARGETS[0].defaultUrl);
+  const [competitors, setCompetitors] = useState([]);
+  const [presetKey, setPresetKey] = useState("");
+  const [collectionUrl, setCollectionUrl] = useState("");
+  const [collectionCurrency, setCollectionCurrency] = useState("");
+  const [selectedCompetitorId, setSelectedCompetitorId] = useState("");
   const [collectionLoading, setCollectionLoading] = useState(false);
   const [collectionResult, setCollectionResult] = useState(null);
   const [collectionError, setCollectionError] = useState("");
 
-  const target = COLLECTION_TARGETS.find((t) => t.key === collectionTarget) || COLLECTION_TARGETS[0];
+  useEffect(() => {
+    let active = true;
+    api
+      .getCompetitors()
+      .then((data) => {
+        if (!active) return;
+        setCompetitors(data);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setCollectionError(err.message);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
-    setCollectionUrl(target.defaultUrl);
-    setCollectionResult(null);
-    setCollectionError("");
-  }, [target.key]);
+    if (!selectedCompetitorId) return;
+    const competitor = competitors.find(
+      (item) => String(item.id) === String(selectedCompetitorId)
+    );
+    if (competitor?.currency) {
+      setCollectionCurrency(competitor.currency);
+    }
+  }, [competitors, selectedCompetitorId]);
+
+  useEffect(() => {
+    if (!presetKey) return;
+    const preset = COLLECTION_PRESETS.find((item) => item.key === presetKey);
+    if (!preset) return;
+    setCollectionUrl(preset.url);
+    if (preset.currency) {
+      setCollectionCurrency(preset.currency);
+    }
+  }, [presetKey]);
 
   async function onCollectionSubmit(e) {
     e.preventDefault();
@@ -59,7 +97,10 @@ export default function CollectionsPage() {
     setCollectionError("");
     setCollectionResult(null);
     try {
-      const res = await target.run(collectionUrl);
+      const res = await api.scrapeCollection({
+        url: collectionUrl,
+        currency: collectionCurrency,
+      });
       setCollectionResult(res);
     } catch (err) {
       setCollectionError(err.message);
@@ -77,7 +118,7 @@ export default function CollectionsPage() {
       image: item.images?.[0] || "",
       url: item.url,
     }));
-    downloadCsv(`collection-${target.key}.csv`, rows);
+    downloadCsv(`collection-scrape.csv`, rows);
   }
 
   return (
@@ -85,14 +126,31 @@ export default function CollectionsPage() {
       <div className="panel-head">
         <div>
           <h2>Collection Scrapers</h2>
-          <p>Pull full product lists from each collection endpoint.</p>
+          <p>Scrape any Shopify collection URL and optional currency.</p>
         </div>
       </div>
       <form className="grid-row" onSubmit={onCollectionSubmit}>
-        <select className="form-select" value={collectionTarget} onChange={(e) => setCollectionTarget(e.target.value)}>
-          {COLLECTION_TARGETS.map((item) => (
+        <select
+          className="form-select"
+          value={presetKey}
+          onChange={(e) => setPresetKey(e.target.value)}
+        >
+          <option value="">Select preset (auto-fill)</option>
+          {COLLECTION_PRESETS.map((item) => (
             <option key={item.key} value={item.key}>
-              {item.label} ({item.route})
+              {item.label}
+            </option>
+          ))}
+        </select>
+        <select
+          className="form-select"
+          value={selectedCompetitorId}
+          onChange={(e) => setSelectedCompetitorId(e.target.value)}
+        >
+          <option value="">Optional competitor</option>
+          {competitors.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name}
             </option>
           ))}
         </select>
@@ -100,7 +158,14 @@ export default function CollectionsPage() {
           className="form-control"
           value={collectionUrl}
           onChange={(e) => setCollectionUrl(e.target.value)}
-          placeholder="Collection URL (optional)"
+          placeholder="Shopify collection URL"
+          required
+        />
+        <input
+          className="form-control"
+          value={collectionCurrency}
+          onChange={(e) => setCollectionCurrency(e.target.value.toUpperCase())}
+          placeholder="Currency (optional)"
         />
         <button className="btn btn-primary" type="submit" disabled={collectionLoading}>
           {collectionLoading ? "Running..." : "Scrape Collection"}
@@ -108,7 +173,7 @@ export default function CollectionsPage() {
       </form>
 
       <div className="row-actions">
-        <span className="muted">Endpoint: {target.route}</span>
+        <span className="muted">Endpoint: /api/collections/scrape</span>
         <button className="btn btn-outline-primary btn-sm" onClick={exportResults} disabled={!collectionResult?.data?.length}>
           Export CSV
         </button>
@@ -138,8 +203,8 @@ export default function CollectionsPage() {
                     )}
                   </td>
                   <td>{item.title}</td>
-                  <td>{formatPrice(item.price)}</td>
-                  <td>{formatPrice(item.compareAtPrice)}</td>
+                  <td>{formatPrice(item.price, item.currency)}</td>
+                  <td>{formatPrice(item.compareAtPrice, item.currency)}</td>
                   <td>
                     {item.url ? (
                       <a href={item.url} rel="noreferrer" target="_blank">
