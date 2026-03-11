@@ -25,8 +25,12 @@ export const api = {
   updateCompetitor: (id, payload) =>
     apiRequest(`/competitors/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   deleteCompetitor: (id) => apiRequest(`/competitors/${id}`, { method: "DELETE" }),
-  searchCompetitor: (id, query) =>
-    apiRequest(`/competitors/${id}/search?q=${encodeURIComponent(query)}`),
+  searchCompetitor: (id, query, options = {}) => {
+    const params = new URLSearchParams();
+    if (query) params.set("q", query);
+    if (options.persist) params.set("persist", "1");
+    return apiRequest(`/competitors/${id}/search?${params.toString()}`);
+  },
   getSearchPresets: (id) => apiRequest(`/competitors/${id}/presets`),
   getProducts: () => apiRequest("/products"),
   addProduct: (payload) => apiRequest("/products", { method: "POST", body: JSON.stringify(payload) }),
@@ -46,6 +50,7 @@ export const api = {
     if (currency) params.set("currency", currency);
     return apiRequest(`/collections/scrape?${params.toString()}`);
   },
+  runLangflow: (payload) => apiRequest("/langflow/run", { method: "POST", body: JSON.stringify(payload) }),
 
   searchVivoBodycons: (q) => publicRequest(`/search-vivo-bodycons?q=${encodeURIComponent(q)}`),
   searchNalaniBodycons: (q) => publicRequest(`/search-nalani-bodycons?q=${encodeURIComponent(q)}`),

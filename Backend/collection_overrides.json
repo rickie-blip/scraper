@@ -1,0 +1,14 @@
+{
+  "byHost": {
+    "neviive.com": {
+      "dresses": ["dresses"],
+      "dress": ["dresses"]
+    }
+  },
+  "byName": {
+    "Neviive": {
+      "dresses": ["dresses"],
+      "dress": ["dresses"]
+    }
+  }
+}

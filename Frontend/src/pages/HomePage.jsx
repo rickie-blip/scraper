@@ -1,6 +1,151 @@
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { api } from "../api";
+import AverageComparisonChart from "../AverageComparisonChart";
+import { flattenCategoryOptions } from "../categoryData";
 
 export default function HomePage() {
+  const [competitors, setCompetitors] = useState([]);
+  const [comparison, setComparison] = useState(null);
+  const [comparisonLoading, setComparisonLoading] = useState(false);
+  const [comparisonError, setComparisonError] = useState("");
+  const [baseCompetitor, setBaseCompetitor] = useState("");
+  const [category, setCategory] = useState("dresses");
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchMessage, setSearchMessage] = useState("");
+  const chartCurrency =
+    competitors.find((c) => c.name === baseCompetitor)?.currency ||
+    competitors[0]?.currency ||
+    "USD";
+  function normalizeCurrency(value) {
+    const normalized = String(value || "").trim().toUpperCase();
+    return /^[A-Z]{3}$/.test(normalized) ? normalized : "USD";
+  }
+
+  function formatPrice(value, currency) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "-";
+    const safeCurrency = normalizeCurrency(currency);
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: safeCurrency,
+    }).format(num);
+  }
+
+  const categoryOptions = useMemo(() => {
+    const flattened = flattenCategoryOptions();
+    const grouped = new Map();
+    flattened.forEach((item) => {
+      if (!grouped.has(item.group)) grouped.set(item.group, []);
+      grouped.get(item.group).push(item);
+    });
+    return Array.from(grouped.entries());
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    api
+      .getCompetitors()
+      .then((data) => {
+        if (!active) return;
+        setCompetitors(data);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setComparisonError(err.message);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function loadComparison({ persist = false } = {}) {
+    setComparisonLoading(true);
+    setComparisonError("");
+    try {
+      if (!competitors.length) {
+        setComparison({ rows: [], failed: [] });
+        return;
+      }
+
+      const requests = competitors.map((competitor) =>
+        api.searchCompetitor(competitor.id, category, { persist })
+      );
+      const results = await Promise.allSettled(requests);
+      const rows = [];
+      const failed = [];
+
+      results.forEach((result, index) => {
+        const competitor = competitors[index];
+        if (result.status !== "fulfilled") {
+          failed.push(competitor?.name || `Competitor ${index + 1}`);
+          rows.push({
+            competitor: competitor?.name || `Competitor ${index + 1}`,
+            items_count: 0,
+            avg_price: null,
+            delta_vs_vivo: null,
+            delta_pct_vs_vivo: null,
+          });
+          return;
+        }
+
+        const items = result.value?.data || [];
+        const prices = items
+          .map((item) => Number(item.price))
+          .filter((value) => Number.isFinite(value));
+        const avg =
+          prices.length > 0
+            ? prices.reduce((sum, value) => sum + value, 0) / prices.length
+            : null;
+        rows.push({
+          competitor: competitor?.name || `Competitor ${index + 1}`,
+          items_count: items.length,
+          avg_price: avg != null ? Number(avg.toFixed(2)) : null,
+          delta_vs_vivo: null,
+          delta_pct_vs_vivo: null,
+        });
+      });
+
+      if (baseCompetitor) {
+        const baseRow = rows.find((row) => row.competitor === baseCompetitor);
+        const baseAvg = baseRow?.avg_price;
+        if (baseAvg != null) {
+          rows.forEach((row) => {
+            if (row.avg_price == null) return;
+            const delta = row.avg_price - baseAvg;
+            row.delta_vs_vivo = Number(delta.toFixed(2));
+            row.delta_pct_vs_vivo =
+              baseAvg !== 0 ? Number(((delta / baseAvg) * 100).toFixed(2)) : null;
+          });
+        }
+      }
+
+      setComparison({ rows, failed });
+    } catch (err) {
+      setComparisonError(err.message);
+    } finally {
+      setComparisonLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!category) return;
+    loadComparison();
+  }, [category, baseCompetitor]);
+
+  async function runSearch() {
+    setSearchLoading(true);
+    setSearchMessage("");
+    try {
+      await loadComparison({ persist: true });
+      setSearchMessage("Search completed. Chart updated.");
+    } catch (err) {
+      setSearchMessage(err.message || "Search failed.");
+    } finally {
+      setSearchLoading(false);
+    }
+  }
+
   return (
     <div className="panel">
       <div className="panel-head">
@@ -22,10 +167,120 @@ export default function HomePage() {
           <span className="home-title">Competitor Tracker</span>
           <span>Manage competitors, products, scraping, and analytics.</span>
         </Link>
-        <Link to="/bot" className="home-card">
-          <span className="home-title">Command Bot</span>
-          <span>Run safe commands to search and scrape in real time.</span>
-        </Link>
+      </div>
+
+      <div className="card-block mt-4">
+        <div className="panel-head">
+          <div>
+            <h3>Quick Actions</h3>
+            <p>Jump straight to the most common tasks.</p>
+          </div>
+        </div>
+        <div className="grid-row">
+          <button
+            type="button"
+            className="btn btn-outline-primary"
+            onClick={runSearch}
+            disabled={searchLoading}
+          >
+            {searchLoading ? "Running Search..." : "Run Category Search"}
+          </button>
+          <Link to="/search" className="btn btn-outline-primary">
+            Search Category
+          </Link>
+          <Link to="/competitors" className="btn btn-outline-primary">
+            Add Competitor
+          </Link>
+        </div>
+        {searchMessage && <div className="alert alert-info mt-3">{searchMessage}</div>}
+      </div>
+
+      <div className="card-block mt-4">
+        <div className="panel-head">
+          <div>
+            <h3>Category Comparison</h3>
+            <p>Average price per competitor and overall category average.</p>
+          </div>
+        </div>
+        <div className="grid-row">
+          <select
+            className="form-select"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+          >
+            {categoryOptions.map(([groupLabel, options]) => (
+              <optgroup key={groupLabel} label={groupLabel}>
+                {options.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <select
+            className="form-select"
+            value={baseCompetitor}
+            onChange={(e) => setBaseCompetitor(e.target.value)}
+          >
+            <option value="">All competitors</option>
+            {competitors.map((item) => (
+              <option key={item.id} value={item.name}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+          <button
+            className="btn btn-primary"
+            type="button"
+            onClick={() => loadComparison({ persist: true })}
+            disabled={comparisonLoading}
+          >
+            {comparisonLoading ? "Loading..." : "Refresh"}
+          </button>
+        </div>
+
+        {comparisonError && <div className="alert alert-warning mt-3">{comparisonError}</div>}
+
+        {comparison && (
+          <div className="mt-3">
+            <AverageComparisonChart rows={comparison.rows || []} currency={chartCurrency} />
+            <div className="table-responsive mt-3">
+              <table className="table table-sm align-middle">
+                <thead>
+                  <tr>
+                    <th>Competitor</th>
+                    <th>Items</th>
+                    <th>Average Price</th>
+                    <th>Delta vs Base</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {comparison.rows?.map((row) => (
+                    <tr key={row.competitor}>
+                      <td>{row.competitor}</td>
+                      <td>{row.items_count}</td>
+                      <td>{formatPrice(row.avg_price, chartCurrency)}</td>
+                      <td>{row.delta_vs_vivo != null ? formatPrice(row.delta_vs_vivo, chartCurrency) : "-"}</td>
+                    </tr>
+                  ))}
+                  {!comparison.rows?.length && (
+                    <tr>
+                      <td colSpan="4" className="text-muted">
+                        No data for the selected category.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            {comparison.failed?.length > 0 && (
+              <div className="alert alert-warning mt-2">
+                Failed searches: {comparison.failed.join(", ")}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

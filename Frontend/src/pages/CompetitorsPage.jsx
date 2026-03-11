@@ -335,7 +335,7 @@ export default function Competitors() {
               value={comparisonFilters.base_competitor}
               onChange={(e) => setComparisonFilters((s) => ({ ...s, base_competitor: e.target.value }))}
             >
-              <option value="">Select base...</option>
+              <option value="">All competitors</option>
               {competitors.map((c) => (
                 <option key={c.id} value={c.name}>{c.name}</option>
               ))}
@@ -407,7 +407,7 @@ export default function Competitors() {
                 onChange={(e) => setLiveCompareForm((s) => ({ ...s, base_competitor: e.target.value }))}
                 required
               >
-                <option value="">Select base...</option>
+                <option value="">All competitors</option>
                 {competitors.map((c) => (
                   <option key={c.id} value={c.name}>{c.name}</option>
                 ))}

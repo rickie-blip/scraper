@@ -80,4 +80,4 @@ echo ""
 echo "🚀 Starting extraction..."
 
 # Run the scraper
-node scrape_final.js
+node scraper.js --mode puma --email

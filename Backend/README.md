@@ -10,6 +10,7 @@ Before running the scraper, you need to set your email credentials:
 # Set your Gmail credentials
 export SENDER_EMAIL="your-email@gmail.com"
 export SENDER_PWD="your-app-password"
+export SCRAPER_EMAIL_RECIPIENTS="nigel@shopzetu.com,patrick@shopzetu.com"
 ```
 
 ### 2. Gmail App Password Setup
@@ -36,19 +37,19 @@ For Gmail accounts, you need to use an App Password:
 export COLLECTION_NAME="men-shoes"
 export COLLECTION_URL="https://us.puma.com/us/en/men/shoes"
 export COLLECTION_DISPLAY_NAME="Men's Shoes"
-node scrape_final.js
+node scraper.js --mode puma --email
 
 # For Women's Shoes
 export COLLECTION_NAME="women-shoes"
 export COLLECTION_URL="https://us.puma.com/us/en/women/shoes"
 export COLLECTION_DISPLAY_NAME="Women's Shoes"
-node scrape_final.js
+node scraper.js --mode puma --email
 
 # For Kids' Shoes
 export COLLECTION_NAME="kids-shoes"
 export COLLECTION_URL="https://us.puma.com/us/en/kids/shoes"
 export COLLECTION_DISPLAY_NAME="Kids' Shoes"
-node scrape_final.js
+node scraper.js --mode puma --email
 ```
 
 ## Features
@@ -95,7 +96,7 @@ export SENDER_PWD="abcd efgh ijkl mnop"  # 16-character app password
 export COLLECTION_NAME="women-shoes"
 export COLLECTION_URL="https://us.puma.com/us/en/women/shoes"
 export COLLECTION_DISPLAY_NAME="Women's Shoes"
-node scrape_final.js
+node scraper.js --mode puma --email
 ```
 
 The scraper will:

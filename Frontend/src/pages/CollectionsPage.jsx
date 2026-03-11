@@ -173,7 +173,6 @@ export default function CollectionsPage() {
       </form>
 
       <div className="row-actions">
-        <span className="muted">Endpoint: /api/collections/scrape</span>
         <button className="btn btn-outline-primary btn-sm" onClick={exportResults} disabled={!collectionResult?.data?.length}>
           Export CSV
         </button>

@@ -3,8 +3,6 @@ import CollectionsPage from "./pages/CollectionsPage";
 import CompetitorsPage from "./pages/CompetitorsPage";
 import HomePage from "./pages/HomePage";
 import SearchPage from "./pages/SearchPage";
-import BotPage from "./pages/BotPage";
-import ChatBotWidget from "./ChatBotWidget";
 
 export default function App() {
   return (
@@ -24,7 +22,6 @@ export default function App() {
           <NavLink to="/search">Search</NavLink>
           <NavLink to="/collections">Collections</NavLink>
           <NavLink to="/competitors">Competitors</NavLink>
-          <NavLink to="/bot">Bot</NavLink>
         </nav>
       </header>
 
@@ -33,9 +30,7 @@ export default function App() {
         <Route path="/search" element={<SearchPage />} />
         <Route path="/collections" element={<CollectionsPage />} />
         <Route path="/competitors" element={<CompetitorsPage />} />
-        <Route path="/bot" element={<BotPage />} />
       </Routes>
-      <ChatBotWidget />
     </div>
   );
 }

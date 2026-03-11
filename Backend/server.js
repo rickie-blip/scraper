@@ -3,7 +3,7 @@ import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import { load } from "cheerio";
-import { scrapeCollection } from "./scrap_collection_json.js";
+import { scrapeCollection } from "./scraper.js";
 
 const app = express();
 app.use(express.json());
@@ -16,10 +16,14 @@ app.use((req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
+const LANGFLOW_HOST = process.env.LANGFLOW_HOST || "";
+const LANGFLOW_FLOW_ID = process.env.LANGFLOW_FLOW_ID || "";
+const LANGFLOW_API_KEY = process.env.LANGFLOW_API_KEY || "";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DATA_DIR = path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "store.json");
+const COLLECTION_OVERRIDES_FILE = path.join(__dirname, "collection_overrides.json");
 const BRAND_CURRENCY = {
   Vivo: "KES",
   Nalani: "KES",
@@ -35,6 +39,11 @@ const DEFAULT_COMPETITORS = [
 
 function resolveBrandCurrency(brand) {
   return BRAND_CURRENCY[brand] || "USD";
+}
+
+function normalizeLangflowHost(host) {
+  if (!host) return "";
+  return String(host).replace(/\/+$/, "");
 }
 
 async function ensureStore() {
@@ -83,6 +92,15 @@ async function readStore() {
     await writeStore(store);
   }
   return store;
+}
+
+async function loadCollectionOverrides() {
+  try {
+    const raw = await fs.readFile(COLLECTION_OVERRIDES_FILE, "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return { byHost: {}, byName: {} };
+  }
 }
 
 async function writeStore(store) {
@@ -364,6 +382,180 @@ async function genericSearchProducts(website, query) {
   }
 }
 
+function slugifyCollectionQuery(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-");
+}
+
+function buildCollectionCandidates(website, query) {
+  const origin = new URL(website).origin;
+  const raw = String(query || "").toLowerCase().trim();
+  if (!raw) return [];
+
+  const baseSlug = slugifyCollectionQuery(raw);
+  const candidates = new Set();
+  if (baseSlug) candidates.add(baseSlug);
+
+  const normalized = raw.replace(/\s+/g, " ");
+  const tokens = normalized.split(" ");
+  if (tokens.length > 1) {
+    const last = tokens[tokens.length - 1];
+    if (last.endsWith("s")) {
+      candidates.add(slugifyCollectionQuery(tokens.slice(0, -1).join(" ")));
+      candidates.add(slugifyCollectionQuery(last));
+    }
+  }
+
+  if (raw.includes("dress")) candidates.add("dresses");
+  if (raw.includes("skirt")) candidates.add("skirts");
+  if (raw.includes("top")) candidates.add("tops");
+  if (raw.includes("bottom")) candidates.add("bottoms");
+
+  return Array.from(candidates)
+    .filter(Boolean)
+    .map((slug) => `${origin}/collections/${slug}`);
+}
+
+function buildQueryVariants(query) {
+  const base = String(query || "").trim();
+  if (!base) return [];
+  const variants = new Set([base]);
+  const lower = base.toLowerCase();
+  if (lower.endsWith("s")) variants.add(lower.slice(0, -1));
+  if (lower.includes("&")) variants.add(lower.replace(/&/g, "and"));
+  if (lower.includes(" and ")) variants.add(lower.replace(/ and /g, " & "));
+  return Array.from(variants);
+}
+
+function buildStoredSearchResults(store, competitorId, query, fallbackCurrency) {
+  const normalizedQuery = String(query || "").toLowerCase().trim();
+  const candidates = store.products.filter(
+    (p) => String(p.competitor_id) === String(competitorId)
+  );
+  const filtered = normalizedQuery
+    ? candidates.filter((p) => {
+        const name = String(p.product_name || "").toLowerCase();
+        const category = String(p.category || "").toLowerCase();
+        return name.includes(normalizedQuery) || category.includes(normalizedQuery);
+      })
+    : candidates;
+
+  return filtered.map((p) => ({
+    title: p.product_name,
+    price: p.latest_price ?? null,
+    image: p.image || null,
+    url: p.product_url,
+    currency: p.currency || fallbackCurrency || null,
+  }));
+}
+
+function buildOverrideCandidates(website, competitorName, query, overrides) {
+  const origin = new URL(website).origin;
+  const host = new URL(website).host.replace(/^www\./, "");
+  const normalizedQuery = String(query || "").toLowerCase().trim();
+
+  const byHost = overrides?.byHost?.[host] || {};
+  const byName = overrides?.byName?.[competitorName] || {};
+  const handles =
+    byHost[normalizedQuery] ||
+    byName[normalizedQuery] ||
+    byHost[query] ||
+    byName[query] ||
+    [];
+
+  return Array.isArray(handles)
+    ? handles.map((handle) => `${origin}/collections/${handle}`)
+    : [];
+}
+
+function expandCollectionCandidates(candidates) {
+  const expanded = new Set(candidates);
+  for (const candidate of candidates) {
+    try {
+      const parsed = new URL(candidate);
+      const host = parsed.host;
+      if (!host.startsWith("www.")) {
+        parsed.host = `www.${host}`;
+        expanded.add(parsed.toString());
+      }
+    } catch {
+      // ignore invalid
+    }
+  }
+  return Array.from(expanded);
+}
+
+async function scrapeCollectionHtml(url) {
+  const html = await fetchText(url, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    },
+  });
+  return extractGenericProductsFromHtml(url, html);
+}
+
+async function findShopifyCollections(website, query) {
+  const origin = new URL(website).origin;
+  const normalizedQuery = String(query || "").toLowerCase().trim();
+  if (!normalizedQuery) return [];
+
+  const queryTokens = normalizedQuery
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9\s-]/g, "")
+    .split(/\s+/)
+    .filter(Boolean);
+
+  const matches = [];
+  let page = 1;
+  let hasMore = true;
+
+  while (hasMore && page <= 5) {
+    const apiUrl = `${origin}/collections.json?limit=250&page=${page}`;
+    try {
+      const data = await fetchJson(apiUrl);
+      const collections = data?.collections || [];
+      if (!collections.length) break;
+
+      for (const collection of collections) {
+        const title = String(collection.title || "").toLowerCase();
+        const handle = collection.handle;
+        if (!handle) continue;
+        const titleTokens = title
+          .replace(/&/g, "and")
+          .replace(/[^a-z0-9\s-]/g, "")
+          .split(/\s+/)
+          .filter(Boolean);
+        const isMatch = queryTokens.every((token) => titleTokens.includes(token));
+        const looseMatch =
+          !queryTokens.length ||
+          title.includes(normalizedQuery) ||
+          (normalizedQuery.includes("dress") && title.includes("dress")) ||
+          (normalizedQuery.includes("skirt") && title.includes("skirt")) ||
+          (normalizedQuery.includes("top") && title.includes("top")) ||
+          (normalizedQuery.includes("bottom") && title.includes("bottom"));
+        if (isMatch || looseMatch) {
+          matches.push(`${origin}/collections/${handle}`);
+        }
+      }
+
+      if (collections.length < 250) {
+        hasMore = false;
+      } else {
+        page += 1;
+      }
+    } catch {
+      break;
+    }
+  }
+
+  return Array.from(new Set(matches));
+}
+
 async function scrapeShopifyCollection(url, currency) {
   const parsed = new URL(url);
   const collectionHandle = parsed.pathname.split("/collections/")[1]?.split("/")[0];
@@ -377,7 +569,13 @@ async function scrapeShopifyCollection(url, currency) {
 
   while (hasMore) {
     const apiUrl = `${parsed.origin}/collections/${collectionHandle}/products.json?limit=250&page=${page}`;
-    const response = await fetch(apiUrl);
+    const response = await fetch(apiUrl, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept: "application/json,text/plain,*/*",
+      },
+    });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
@@ -418,6 +616,77 @@ app.get("/", (req, res) => {
 
 app.get("/api/health", (req, res) => {
   res.status(200).json({ ok: true });
+});
+
+app.post("/api/langflow/run", async (req, res) => {
+  try {
+    const {
+      message,
+      sessionId,
+      inputType,
+      outputType,
+      tweaks,
+      flowId,
+      hostUrl,
+      apiKey,
+    } = req.body || {};
+
+    if (!message) {
+      return res.status(400).json({ error: "message is required." });
+    }
+
+    const resolvedHost = normalizeLangflowHost(hostUrl || LANGFLOW_HOST);
+    const resolvedFlowId = flowId || LANGFLOW_FLOW_ID;
+    const resolvedApiKey = apiKey || LANGFLOW_API_KEY;
+
+    if (!resolvedHost || !resolvedFlowId) {
+      return res.status(400).json({
+        error: "Langflow host and flow ID are required.",
+      });
+    }
+
+    const payload = {
+      input_value: message,
+      input_type: inputType || "chat",
+      output_type: outputType || "chat",
+    };
+
+    if (sessionId) payload.session_id = sessionId;
+    if (tweaks) payload.tweaks = tweaks;
+
+    const response = await fetch(
+      `${resolvedHost}/api/v1/run/${resolvedFlowId}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          accept: "application/json",
+          ...(resolvedApiKey ? { "x-api-key": resolvedApiKey } : {}),
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    const raw = await response.text();
+    let data = null;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      data = { raw };
+    }
+
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: "Langflow request failed.",
+        status: response.status,
+        data,
+      });
+    }
+
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
 });
 
 app.get("/api/dashboard/summary", async (req, res) => {
@@ -548,10 +817,101 @@ app.get("/api/competitors/:id/search", async (req, res) => {
     }
 
     let products = [];
-    try {
-      products = await shopifySearchProducts(competitor.website, query);
-    } catch {
-      products = await genericSearchProducts(competitor.website, query);
+    const overrides = await loadCollectionOverrides();
+    const overrideCandidates = expandCollectionCandidates(
+      buildOverrideCandidates(competitor.website, competitor.name, query, overrides)
+    );
+    for (const candidate of overrideCandidates) {
+      try {
+        products = await scrapeShopifyCollection(candidate, competitor.currency);
+        if (products.length) break;
+      } catch {
+        // try next candidate
+      }
+    }
+
+    if (!products.length) {
+      for (const candidate of overrideCandidates) {
+        try {
+          products = await scrapeCollectionHtml(candidate);
+          if (products.length) break;
+        } catch {
+          // try next candidate
+        }
+      }
+    }
+
+    const collectionCandidates = expandCollectionCandidates(
+      buildCollectionCandidates(competitor.website, query)
+    );
+    for (const candidate of collectionCandidates) {
+      try {
+        products = await scrapeShopifyCollection(candidate, competitor.currency);
+        if (products.length) break;
+      } catch {
+        // try next candidate
+      }
+    }
+
+    if (!products.length) {
+      for (const candidate of collectionCandidates) {
+        try {
+          products = await scrapeCollectionHtml(candidate);
+          if (products.length) break;
+        } catch {
+          // try next candidate
+        }
+      }
+    }
+
+    if (!products.length) {
+      const discoveredCollections = await findShopifyCollections(competitor.website, query);
+      const discoveredCandidates = expandCollectionCandidates(discoveredCollections);
+      for (const candidate of discoveredCandidates) {
+        try {
+          products = await scrapeShopifyCollection(candidate, competitor.currency);
+          if (products.length) break;
+        } catch {
+          // try next candidate
+        }
+      }
+    }
+
+    if (!products.length) {
+      const discoveredCollections = await findShopifyCollections(competitor.website, query);
+      const discoveredCandidates = expandCollectionCandidates(discoveredCollections);
+      for (const candidate of discoveredCandidates) {
+        try {
+          products = await scrapeCollectionHtml(candidate);
+          if (products.length) break;
+        } catch {
+          // try next candidate
+        }
+      }
+    }
+
+    if (!products.length) {
+      const queryVariants = buildQueryVariants(query);
+      for (const variant of queryVariants) {
+        try {
+          products = await shopifySearchProducts(competitor.website, variant);
+          if (!products.length) {
+            products = await genericSearchProducts(competitor.website, variant);
+          }
+        } catch {
+          products = await genericSearchProducts(competitor.website, variant);
+        }
+        if (products.length) break;
+      }
+    }
+
+    if (!products.length) {
+      products = buildStoredSearchResults(
+        store,
+        competitor.id,
+        query,
+        competitor.currency
+      );
     }
     const currency = competitor.currency || "USD";
     const data = products.map((p) => ({
@@ -560,11 +920,78 @@ app.get("/api/competitors/:id/search", async (req, res) => {
       currency,
     }));
 
+    let persisted = { created: 0, updated: 0, history: 0 };
+    const persistFlag = String(req.query.persist || "").toLowerCase();
+    const shouldPersist = persistFlag === "1" || persistFlag === "true" || persistFlag === "yes";
+
+    if (shouldPersist) {
+      const collectedAt = new Date().toISOString();
+      const collectedDay = collectedAt.slice(0, 10);
+      for (const item of data) {
+        const productUrl = item.url || item.product_url || "";
+        if (!productUrl) continue;
+        let product = store.products.find(
+          (p) =>
+            String(p.competitor_id) === String(competitor.id) &&
+            String(p.product_url) === String(productUrl)
+        );
+        if (!product) {
+          product = {
+            id: store.counters.product++,
+            competitor_id: Number(competitor.id),
+            competitor_name: competitor.name,
+            product_name: String(item.title || item.product_name || "Unknown"),
+            category: String(query || "General"),
+            product_url: String(productUrl),
+            currency: item.currency || competitor.currency || null,
+            latest_price: null,
+            latest_collected_at: null,
+          };
+          store.products.push(product);
+          persisted.created += 1;
+        } else {
+          product.product_name = item.title || item.product_name || product.product_name;
+          product.currency = item.currency || product.currency || competitor.currency || null;
+          persisted.updated += 1;
+        }
+
+        const priceValue = Number(item.price);
+        if (Number.isFinite(priceValue)) {
+          const normalizedPrice = Number(priceValue.toFixed(2));
+          const alreadyLogged =
+            store.history.some(
+              (h) =>
+                h.product_id === product.id &&
+                Number(h.price).toFixed(2) === normalizedPrice.toFixed(2) &&
+                String(h.collected_at || "").slice(0, 10) === collectedDay
+            ) ||
+            (Number(product.latest_price).toFixed(2) === normalizedPrice.toFixed(2) &&
+              String(product.latest_collected_at || "").slice(0, 10) === collectedDay);
+
+          if (!alreadyLogged) {
+            const entry = {
+              id: store.counters.history++,
+              product_id: product.id,
+              price: normalizedPrice,
+              collected_at: collectedAt,
+            };
+            store.history.push(entry);
+            product.latest_price = entry.price;
+            product.latest_collected_at = entry.collected_at;
+            persisted.history += 1;
+          }
+        }
+      }
+
+      await writeStore(store);
+    }
+
     res.status(200).json({
       success: true,
       count: data.length,
       data,
       competitor: { id: competitor.id, name: competitor.name },
+      persisted,
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -581,7 +1008,52 @@ app.get("/api/competitors/:id/presets", async (req, res) => {
       return res.status(404).json({ error: "Competitor not found." });
     }
 
-    const defaults = ["dresses", "bodysuits", "bodycons"];
+    const defaults = [
+      "dresses",
+      "bodycons",
+      "corset dresses",
+      "knee length dresses",
+      "midi & capri dresses",
+      "maxi dresses",
+      "short dresses",
+      "mini dresses",
+      "shirt dresses",
+      "skirts",
+      "denim skirts",
+      "knee length skirts",
+      "midi & capri skirts",
+      "mini skirts",
+      "maxi skirts",
+      "skirt suits",
+      "bottoms",
+      "culottes & capri pants",
+      "denim bottoms",
+      "full length pants",
+      "jumpsuits & playsuits",
+      "leggings",
+      "loungewear",
+      "midi & capri pants",
+      "pant sets",
+      "short sets",
+      "shorts & skorts",
+      "tops",
+      "beachwear",
+      "bodysuits",
+      "corset tops",
+      "crop shirts",
+      "fitted tops",
+      "midriff & crop tops",
+      "loose tops",
+      "shirt tops",
+      "t-shirts & tank tops",
+      "innerwear",
+      "bra & panty sets",
+      "bralettes",
+      "bras",
+      "lingerie",
+      "panties",
+      "shapewear",
+    ];
     const presets = Array.isArray(competitor.search_presets) && competitor.search_presets.length
       ? competitor.search_presets
       : defaults;

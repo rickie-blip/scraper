@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { downloadCsv } from "../utils/csv";
+import { CATEGORY_TREE } from "../categoryData";
 
 function normalizeCurrency(value) {
   const normalized = String(value || "").trim().toUpperCase();
@@ -20,12 +21,17 @@ function formatPrice(value, currency = "USD") {
 export default function SearchPage() {
   const [competitors, setCompetitors] = useState([]);
   const [searchCompetitorId, setSearchCompetitorId] = useState("");
-  const [presets, setPresets] = useState([]);
-  const [presetKey, setPresetKey] = useState("");
+  const [category, setCategory] = useState("dresses");
+  const [subcategory, setSubcategory] = useState("dresses");
+  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
+  const [openCategoryKey, setOpenCategoryKey] = useState("dresses");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchResult, setSearchResult] = useState(null);
   const [searchError, setSearchError] = useState("");
+  const categoryRef = useRef(null);
+
+  const categories = CATEGORY_TREE;
 
   useEffect(() => {
     let active = true;
@@ -35,7 +41,7 @@ export default function SearchPage() {
         if (!active) return;
         setCompetitors(data);
         if (data.length) {
-          setSearchCompetitorId(String(data[0].id));
+          setSearchCompetitorId("all");
         }
       })
       .catch((err) => {
@@ -49,31 +55,29 @@ export default function SearchPage() {
 
   useEffect(() => {
     if (!searchCompetitorId) return;
-    let active = true;
-    api
-      .getSearchPresets(searchCompetitorId)
-      .then((data) => {
-        if (!active) return;
-        const list = Array.isArray(data.presets) ? data.presets : [];
-        setPresets(list);
-        if (list.length) {
-          setPresetKey(list[0]);
-          setSearchQuery(list[0]);
-        }
-      })
-      .catch((err) => {
-        if (!active) return;
-        setSearchError(err.message);
-      });
-    return () => {
-      active = false;
-    };
+    setSearchQuery(subcategory || category);
   }, [searchCompetitorId]);
 
   useEffect(() => {
-    if (!presetKey) return;
-    setSearchQuery(presetKey);
-  }, [presetKey]);
+    setSearchQuery(subcategory || category);
+  }, [category, subcategory]);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (!categoryMenuOpen) return;
+      if (categoryRef.current && !categoryRef.current.contains(event.target)) {
+        setCategoryMenuOpen(false);
+        setOpenCategoryKey("");
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("touchstart", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("touchstart", handleClickOutside);
+    };
+  }, [categoryMenuOpen]);
 
   async function onSearchSubmit(e) {
     e.preventDefault();
@@ -81,8 +85,34 @@ export default function SearchPage() {
     setSearchError("");
     setSearchResult(null);
     try {
-      const res = await api.searchCompetitor(searchCompetitorId, searchQuery);
-      setSearchResult(res);
+      if (searchCompetitorId === "all") {
+        const requests = competitors.map((competitor) =>
+          api.searchCompetitor(competitor.id, searchQuery, { persist: true })
+        );
+        const results = await Promise.allSettled(requests);
+        const combined = {
+          success: true,
+          count: 0,
+          data: [],
+          failed: [],
+        };
+
+        results.forEach((result, index) => {
+          if (result.status === "fulfilled") {
+            const payload = result.value;
+            const items = payload?.data || [];
+            combined.data.push(...items);
+            combined.count += items.length;
+          } else {
+            combined.failed.push(competitors[index]?.name || `Competitor ${index + 1}`);
+          }
+        });
+
+        setSearchResult(combined);
+      } else {
+        const res = await api.searchCompetitor(searchCompetitorId, searchQuery, { persist: true });
+        setSearchResult(res);
+      }
     } catch (err) {
       setSearchError(err.message);
     } finally {
@@ -99,7 +129,8 @@ export default function SearchPage() {
       image: item.image,
       url: item.url,
     }));
-    downloadCsv(`search-${searchCompetitorId || "competitor"}.csv`, rows);
+    const label = searchCompetitorId === "all" ? "all-competitors" : searchCompetitorId || "competitor";
+    downloadCsv(`search-${label}.csv`, rows);
   }
 
   return (
@@ -111,26 +142,67 @@ export default function SearchPage() {
         </div>
       </div>
       <form className="grid-row" onSubmit={onSearchSubmit}>
-        <select
-          className="form-select"
-          value={presetKey}
-          onChange={(e) => setPresetKey(e.target.value)}
-          disabled={!presets.length}
-        >
-          {!presets.length && <option value="">No presets</option>}
-          {presets.map((item) => (
-            <option key={item} value={item}>
-              {item}
-            </option>
-          ))}
-        </select>
+        <div className="category-dropdown" ref={categoryRef}>
+          <button
+            className="btn btn-outline-secondary category-toggle"
+            type="button"
+            onClick={() => setCategoryMenuOpen((open) => !open)}
+          >
+            Category: {categories.find((c) => c.key === category)?.label || "Dresses"}
+            <span className="caret">▾</span>
+          </button>
+          {categoryMenuOpen && (
+            <div className="category-menu">
+              {categories.map((item) => (
+                <div key={item.key} className="category-item">
+                  <button
+                    type="button"
+                    className="category-choice"
+                    onClick={() => {
+                      setCategory(item.key);
+                      setOpenCategoryKey((current) => (current === item.key ? "" : item.key));
+                      if (!item.subcategories?.length) {
+                        setSubcategory(item.key);
+                        setCategoryMenuOpen(false);
+                      } else if (item.subcategories.length) {
+                        setSubcategory(item.subcategories[0].value);
+                      }
+                    }}
+                  >
+                    {item.label}
+                    {item.subcategories?.length ? <span className="caret">▾</span> : null}
+                  </button>
+                  {item.subcategories?.length && openCategoryKey === item.key && (
+                    <div className="subcategory-menu">
+                      {item.subcategories.map((sub) => (
+                        <button
+                          key={sub.value}
+                          type="button"
+                          className="subcategory-choice"
+                          onClick={() => {
+                            setCategory(item.key);
+                            setSubcategory(sub.value);
+                            setCategoryMenuOpen(false);
+                            setOpenCategoryKey("");
+                          }}
+                        >
+                          {sub.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         <select
           className="form-select"
           value={searchCompetitorId}
           onChange={(e) => setSearchCompetitorId(e.target.value)}
           required
         >
-          <option value="">Select competitor...</option>
+          <option value="all">All competitors</option>
           {competitors.map((item) => (
             <option key={item.id} value={item.id}>
               {item.name}
@@ -154,7 +226,6 @@ export default function SearchPage() {
       </form>
 
       <div className="row-actions">
-        <span className="muted">Endpoint: /api/competitors/:id/search</span>
         <button className="btn btn-outline-primary btn-sm" onClick={exportResults} disabled={!searchResult?.data?.length}>
           Export CSV
         </button>
@@ -202,6 +273,11 @@ export default function SearchPage() {
               )}
             </tbody>
           </table>
+          {searchResult.failed?.length > 0 && (
+            <div className="alert alert-warning mt-2">
+              Failed searches: {searchResult.failed.join(", ")}
+            </div>
+          )}
         </div>
       )}
     </div>

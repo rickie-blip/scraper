@@ -92,5 +92,5 @@ export SENDER_PWD="your-app-password"
 export COLLECTION_NAME="women-shoes"
 export COLLECTION_URL="https://us.puma.com/us/en/women/shoes"
 export COLLECTION_DISPLAY_NAME="Women's Shoes"
-node scrape_final.js
+node scraper.js --mode puma
 ```
