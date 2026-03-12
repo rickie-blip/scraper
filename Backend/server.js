@@ -28,7 +28,10 @@ const BRAND_CURRENCY = {
   Vivo: "KES",
   Nalani: "KES",
   Neviive: "KES",
-  Diracfashion: "KES",
+  Diracfashion: "GBP",
+};
+const HOST_CURRENCY_OVERRIDES = {
+  "diracfashion.com": "GBP",
 };
 const DEFAULT_COMPETITORS = [
   { name: "Vivo", website: "https://pay.shopzetu.com", currency: BRAND_CURRENCY.Vivo },
@@ -41,9 +44,55 @@ function resolveBrandCurrency(brand) {
   return BRAND_CURRENCY[brand] || "USD";
 }
 
+function getCompetitorWebsites(competitor) {
+  const websites = new Set();
+  if (competitor?.website) websites.add(String(competitor.website));
+  if (String(competitor?.name || "").toLowerCase() === "vivo") {
+    websites.add("https://pay.shopzetu.com");
+  }
+  return Array.from(websites);
+}
+
+function isVivoBrandItem(item) {
+  const title = String(item?.title || item?.product_name || "").toLowerCase();
+  if (title.includes("vivo")) return true;
+  if (title.includes("safari")) return true;
+  if (title.includes("zoya")) return true;
+  return false;
+}
+
 function normalizeLangflowHost(host) {
   if (!host) return "";
   return String(host).replace(/\/+$/, "");
+}
+
+function pruneStore(store, daysToKeep = 7) {
+  const now = Date.now();
+  const cutoff = now - daysToKeep * 24 * 60 * 60 * 1000;
+  let changed = false;
+
+  if (Array.isArray(store.history)) {
+    const before = store.history.length;
+    store.history = store.history.filter((entry) => {
+      const ts = Date.parse(entry?.collected_at || "");
+      return Number.isFinite(ts) ? ts >= cutoff : true;
+    });
+    if (store.history.length !== before) changed = true;
+  }
+
+  if (store.dashboard && typeof store.dashboard === "object") {
+    const keys = Object.keys(store.dashboard);
+    for (const key of keys) {
+      const updatedAt = store.dashboard[key]?.updated_at;
+      const ts = Date.parse(updatedAt || "");
+      if (Number.isFinite(ts) && ts < cutoff) {
+        delete store.dashboard[key];
+        changed = true;
+      }
+    }
+  }
+
+  return changed;
 }
 
 async function ensureStore() {
@@ -63,6 +112,7 @@ async function ensureStore() {
       products: [],
       history: [],
       counters: { competitor: seededCompetitors.length + 1, product: 1, history: 1 },
+      dashboard: {},
       seeded: true,
     };
     await fs.writeFile(DATA_FILE, JSON.stringify(initial, null, 2), "utf-8");
@@ -73,6 +123,10 @@ async function readStore() {
   await ensureStore();
   const raw = await fs.readFile(DATA_FILE, "utf-8");
   const store = JSON.parse(raw);
+  if (!store.dashboard || typeof store.dashboard !== "object") {
+    store.dashboard = {};
+  }
+  let storeChanged = false;
   if (
     Array.isArray(store.competitors) &&
     store.competitors.length === 0 &&
@@ -89,6 +143,34 @@ async function readStore() {
     store.counters = store.counters || { competitor: 1, product: 1, history: 1 };
     store.counters.competitor = seededCompetitors.length + 1;
     store.seeded = true;
+    storeChanged = true;
+  }
+  if (Array.isArray(store.competitors)) {
+    for (const competitor of store.competitors) {
+      if (String(competitor.name).toLowerCase() === "diracfashion") {
+        const normalized = normalizeCurrencyCode(competitor.currency);
+        if (!normalized || normalized === "KES") {
+          competitor.currency = "GBP";
+          storeChanged = true;
+        }
+      }
+    }
+  }
+  if (Array.isArray(store.products)) {
+    for (const product of store.products) {
+      if (String(product.competitor_name).toLowerCase() === "diracfashion") {
+        const normalized = normalizeCurrencyCode(product.currency);
+        if (!normalized || normalized === "KES") {
+          product.currency = "GBP";
+          storeChanged = true;
+        }
+      }
+    }
+  }
+  if (pruneStore(store, 7)) {
+    storeChanged = true;
+  }
+  if (storeChanged) {
     await writeStore(store);
   }
   return store;
@@ -120,6 +202,277 @@ function normalizeMoney(raw) {
   if (num == null) return null;
   if (Number.isInteger(num) && num >= 1000) return Number((num / 100).toFixed(2));
   return Number(num.toFixed(2));
+}
+
+async function fetchJson(url, options = {}) {
+  const res = await fetch(url, options);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function fetchText(url, options = {}) {
+  const res = await fetch(url, options);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.text();
+}
+
+const shopCurrencyCache = new Map();
+const collectionImageCache = new Map();
+const productImageCache = new Map();
+
+function normalizeCurrencyCode(value) {
+  const code = String(value || "").trim().toUpperCase();
+  if (!code) return null;
+  if (code === "KSH") return "KES";
+  if (/^[A-Z]{3}$/.test(code)) return code;
+  return null;
+}
+
+function isCollectionUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.pathname.includes("/collections/") &&
+      !parsed.pathname.includes("/products/")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isProductUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.pathname.includes("/products/");
+  } catch {
+    return false;
+  }
+}
+
+async function fetchCollectionImage(url) {
+  if (!url || !isCollectionUrl(url)) return null;
+  if (collectionImageCache.has(url)) return collectionImageCache.get(url);
+  try {
+    const parsed = new URL(url);
+    const handle = parsed.pathname.split("/collections/")[1]?.split("/")[0];
+    if (!handle) {
+      collectionImageCache.set(url, null);
+      return null;
+    }
+    const apiUrl = `${parsed.origin}/collections/${handle}.json`;
+    const data = await fetchJson(apiUrl);
+    const image =
+      data?.collection?.image?.src ||
+      data?.collection?.image?.url ||
+      data?.products?.[0]?.images?.[0]?.src ||
+      data?.products?.[0]?.images?.[0] ||
+      null;
+    const normalized = image ? normalizeImageUrl(parsed.origin, image) : null;
+    collectionImageCache.set(url, normalized);
+    return normalized;
+  } catch {
+    collectionImageCache.set(url, null);
+    return null;
+  }
+}
+
+async function fetchProductImage(url) {
+  if (!url || !isProductUrl(url)) return null;
+  if (productImageCache.has(url)) return productImageCache.get(url);
+  try {
+    const parsed = new URL(url);
+    const handle = parsed.pathname.split("/products/")[1]?.split("/")[0];
+    if (!handle) {
+      productImageCache.set(url, null);
+      return null;
+    }
+    const jsUrl = `${parsed.origin}/products/${handle}.js`;
+    const data = await fetchJson(jsUrl);
+    const image =
+      data?.images?.[0] ||
+      data?.featured_image ||
+      data?.media?.[0]?.src ||
+      null;
+    const normalized = image ? normalizeImageUrl(parsed.origin, image) : null;
+    productImageCache.set(url, normalized);
+    return normalized;
+  } catch {
+    productImageCache.set(url, null);
+    return null;
+  }
+}
+
+const KES_BASE_CURRENCY = "KES";
+const FX_DEFAULT_RATES = {
+  USD: 129.25,
+  EUR: 149.86,
+  GBP: 0,
+};
+const FX_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+const fxCache = {
+  rates: { ...FX_DEFAULT_RATES },
+  fetchedAt: {},
+};
+
+async function fetchFxRatesToKes(currencies = []) {
+  const now = Date.now();
+  const requested = new Set(
+    ["USD", "EUR", "GBP", ...currencies]
+      .map((code) => normalizeCurrencyCode(code))
+      .filter(Boolean)
+  );
+
+  await Promise.all(
+    Array.from(requested).map(async (code) => {
+      if (code === KES_BASE_CURRENCY) return;
+      const lastFetched = fxCache.fetchedAt[code] || 0;
+      if (fxCache.rates[code] && now - lastFetched < FX_CACHE_TTL_MS) return;
+      try {
+        const data = await fetchJson(
+          `https://api.frankfurter.app/latest?from=${code}&to=KES`
+        );
+        const rate = Number(data?.rates?.KES);
+        if (Number.isFinite(rate) && rate > 0) {
+          fxCache.rates[code] = rate;
+          fxCache.fetchedAt[code] = now;
+          return;
+        }
+      } catch {
+        // try fallback provider below
+      }
+
+      try {
+        const data = await fetchJson(
+          `https://open.er-api.com/v6/latest/${code}`
+        );
+        const rate = Number(data?.rates?.KES);
+        if (Number.isFinite(rate) && rate > 0) {
+          fxCache.rates[code] = rate;
+          fxCache.fetchedAt[code] = now;
+        }
+      } catch {
+        // keep cached/default rate
+      }
+    })
+  );
+
+  return fxCache.rates;
+}
+
+function canConvertToKes(currency, rates) {
+  const normalized = normalizeCurrencyCode(currency || "");
+  if (!normalized || normalized === KES_BASE_CURRENCY) return true;
+  return Number.isFinite(rates?.[normalized]) && rates[normalized] > 0;
+}
+
+function convertToKes(value, currency, rates) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return null;
+  const normalized = normalizeCurrencyCode(currency || "");
+  if (!normalized || normalized === KES_BASE_CURRENCY) return amount;
+  const rate = rates?.[normalized];
+  if (!rate) return amount;
+  return Number((amount * rate).toFixed(2));
+}
+
+function applyKesConversion(item, sourceCurrency, fxRates) {
+  const normalized = normalizeCurrencyCode(sourceCurrency || "");
+  const rate = normalized ? fxRates?.[normalized] : null;
+  const canConvert = normalized && normalized !== KES_BASE_CURRENCY && rate;
+
+  if (!canConvert) {
+    return {
+      currency: normalized || item.currency || null,
+      price: item.price ?? null,
+      compareAtPrice: item.compareAtPrice ?? null,
+      original_currency: null,
+      original_price: null,
+    };
+  }
+
+  return {
+    currency: KES_BASE_CURRENCY,
+    price: convertToKes(item.price, normalized, fxRates),
+    compareAtPrice: convertToKes(item.compareAtPrice, normalized, fxRates),
+    original_currency: normalized,
+    original_price: item.price ?? null,
+  };
+}
+
+function currencyFromMoneyFormat(format) {
+  if (!format) return null;
+  const cleaned = String(format);
+  if (/(KES|KSH)/i.test(cleaned)) return "KES";
+  if (/(USD|\$)/i.test(cleaned)) return "USD";
+  if (/(EUR|â‚¬)/i.test(cleaned)) return "EUR";
+  if (/(GBP|Â£)/i.test(cleaned)) return "GBP";
+  return null;
+}
+
+function currencyFromHtml(html) {
+  if (!html) return null;
+  const text = String(html);
+  const direct =
+    text.match(/"currency"\s*:\s*"([A-Z]{3})"/) ||
+    text.match(/"currency_code"\s*:\s*"([A-Z]{3})"/) ||
+    text.match(/Shopify\.currency\s*=\s*\{[^}]*"active"\s*:\s*"([A-Z]{3})"/) ||
+    text.match(/Shopify\.currency\.active\s*=\s*"([A-Z]{3})"/) ||
+    text.match(/"money_format"\s*:\s*"([^"]+)"/) ||
+    text.match(/money_format\s*:\s*"([^"]+)"/);
+  if (!direct) return null;
+  if (direct[1] && direct[0].includes("money_format")) {
+    return currencyFromMoneyFormat(direct[1]);
+  }
+  return normalizeCurrencyCode(direct[1]);
+}
+
+async function fetchShopCurrency(website) {
+  try {
+    const origin = new URL(website).origin;
+    const host = new URL(website).host.replace(/^www\./, "");
+    if (HOST_CURRENCY_OVERRIDES[host]) {
+      const override = normalizeCurrencyCode(HOST_CURRENCY_OVERRIDES[host]);
+      if (override) return override;
+    }
+    if (shopCurrencyCache.has(origin)) return shopCurrencyCache.get(origin);
+
+    const candidates = [`${origin}/meta.json`, `${origin}/localization.json`];
+    for (const url of candidates) {
+      try {
+        const data = await fetchJson(url);
+        const currency =
+          normalizeCurrencyCode(data?.currency) ||
+          normalizeCurrencyCode(data?.shop?.currency) ||
+          normalizeCurrencyCode(data?.currency?.iso_code) ||
+          currencyFromMoneyFormat(data?.money_format) ||
+          currencyFromMoneyFormat(data?.moneyFormat) ||
+          currencyFromMoneyFormat(data?.shop?.money_format);
+        if (currency) {
+          shopCurrencyCache.set(origin, currency);
+          return currency;
+        }
+      } catch {
+        // try next
+      }
+    }
+
+    try {
+      const html = await fetchText(origin, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
+      });
+      const currency = currencyFromHtml(html);
+      shopCurrencyCache.set(origin, currency || null);
+      return currency || null;
+    } catch {
+      shopCurrencyCache.set(origin, null);
+      return null;
+    }
+  } catch {
+    return null;
+  }
 }
 
 async function fetchShopifyPrice(productUrl) {
@@ -192,6 +545,17 @@ function findPriceInText(text) {
   return null;
 }
 
+function findCurrencyInText(text) {
+  if (!text) return null;
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (/(KES|KSH|KSh)/.test(cleaned)) return "KES";
+  if (/\bUSD\b/.test(cleaned)) return "USD";
+  if (/\bEUR\b/.test(cleaned) || /â‚¬/.test(cleaned)) return "EUR";
+  if (/\bGBP\b/.test(cleaned) || /Â£/.test(cleaned)) return "GBP";
+  if (/\$/.test(cleaned)) return "USD";
+  return null;
+}
+
 function absoluteUrl(baseUrl, href) {
   try {
     return new URL(href, baseUrl).toString();
@@ -200,11 +564,27 @@ function absoluteUrl(baseUrl, href) {
   }
 }
 
+function normalizeImageUrl(baseUrl, image) {
+  if (!image) return null;
+  const candidate = typeof image === "object" && image.src ? image.src : image;
+  const value = String(candidate || "").trim();
+  if (!value) return null;
+  if (value.startsWith("data:") || value.startsWith("blob:")) return value;
+  return absoluteUrl(baseUrl, value);
+}
+
 function extractGenericProductsFromHtml(baseUrl, html, limit = 200) {
   const $ = load(html);
   const baseOrigin = new URL(baseUrl).origin;
   const seen = new Set();
   const results = [];
+  const pageCurrency =
+    normalizeCurrencyCode(
+      $('meta[property="product:price:currency"]').attr("content") ||
+        $('meta[property="og:price:currency"]').attr("content") ||
+        $('meta[itemprop="priceCurrency"]').attr("content")
+    ) ||
+    findCurrencyInText($("body").text());
 
   const anchorNodes = $("a[href]").toArray();
   for (const node of anchorNodes) {
@@ -222,12 +602,17 @@ function extractGenericProductsFromHtml(baseUrl, html, limit = 200) {
     const price =
       findPriceInText(containerText) ??
       findPriceInText(anchorText);
+    const currency =
+      findCurrencyInText(containerText) ??
+      findCurrencyInText(anchorText) ??
+      pageCurrency;
 
     const img = $(node).find("img").first().length
       ? $(node).find("img").first()
       : container.find("img").first();
-    const image =
+    const rawImage =
       img.attr("src") || img.attr("data-src") || img.attr("data-original") || null;
+    const image = normalizeImageUrl(baseUrl, rawImage);
     const title =
       anchorText ||
       img.attr("alt") ||
@@ -243,6 +628,7 @@ function extractGenericProductsFromHtml(baseUrl, html, limit = 200) {
     results.push({
       title,
       price,
+      currency,
       image,
       url: abs,
     });
@@ -254,34 +640,63 @@ function extractGenericProductsFromHtml(baseUrl, html, limit = 200) {
 function buildSummary(store) {
   const latestUpdates = [...store.history]
     .sort((a, b) => new Date(b.collected_at) - new Date(a.collected_at))
-    .slice(0, 8)
     .map((entry) => {
       const product = store.products.find((p) => p.id === entry.product_id);
+      if (!product || !isProductUrl(product.product_url)) return null;
       return {
         product_id: entry.product_id,
         product_name: product?.product_name || "Unknown",
         price: entry.price,
         collected_at: entry.collected_at,
       };
-    });
+    })
+    .filter(Boolean)
+    .slice(0, 8);
+
+  const productCount = store.products.filter((p) => isProductUrl(p.product_url)).length;
 
   return {
     total_competitors: store.competitors.length,
-    total_products: store.products.length,
+    total_products: productCount,
     latest_updates: latestUpdates,
   };
 }
 
-function buildComparison(store, baseCompetitor, category) {
+async function buildComparison(store, baseCompetitor, category) {
   const rows = [];
   const grouped = new Map();
+  const competitorById = new Map(store.competitors.map((c) => [c.id, c]));
+  const currencySet = new Set();
+  const entries = [];
 
   for (const product of store.products) {
+    if (!isProductUrl(product.product_url)) continue;
     if (category && product.category !== category) continue;
     if (product.latest_price == null) continue;
-    const key = product.competitor_name;
+    const competitor = competitorById.get(product.competitor_id);
+    const sourceCurrency = product.currency || competitor?.currency || null;
+    if (sourceCurrency) currencySet.add(sourceCurrency);
+    entries.push({
+      competitor_name: product.competitor_name,
+      price: product.latest_price,
+      currency: sourceCurrency,
+    });
+  }
+
+  const fxRates = await fetchFxRatesToKes(Array.from(currencySet));
+  for (const entry of entries) {
+    if (!canConvertToKes(entry.currency, fxRates)) {
+      continue;
+    }
+    const converted = applyKesConversion(
+      { price: entry.price, compareAtPrice: null, currency: entry.currency },
+      entry.currency,
+      fxRates
+    );
+    const normalizedPrice = converted.price ?? entry.price;
+    const key = entry.competitor_name;
     if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key).push(product.latest_price);
+    grouped.get(key).push(normalizedPrice);
   }
 
   let baseAvg = null;
@@ -304,7 +719,7 @@ function buildComparison(store, baseCompetitor, category) {
   }
 
   rows.sort((a, b) => a.competitor.localeCompare(b.competitor));
-  return { base_found: baseAvg != null, rows };
+  return { base_found: baseAvg != null, base_currency: KES_BASE_CURRENCY, rows };
 }
 
 async function shopifySuggest(website, query) {
@@ -326,6 +741,7 @@ async function shopifySuggest(website, query) {
 
 async function shopifySearchProducts(website, query) {
   const parsed = new URL(website);
+  const storeCurrency = await fetchShopCurrency(parsed.origin);
   const url = `${parsed.origin}/search/suggest.json?q=${encodeURIComponent(
     query
   )}&resources[type]=product`;
@@ -336,7 +752,9 @@ async function shopifySearchProducts(website, query) {
   return products.map((p) => ({
     title: p.title,
     price: Number(p.price),
-    image: p.image || null,
+    image: normalizeImageUrl(parsed.origin, p.image),
+    vendor: p.vendor || p.vendorName || p.brand?.name || null,
+    currency: p.currency || storeCurrency || null,
     url: p.url ? `${parsed.origin}${p.url}` : parsed.origin,
   }));
 }
@@ -420,7 +838,19 @@ function buildCollectionCandidates(website, query) {
     .map((slug) => `${origin}/collections/${slug}`);
 }
 
-function buildQueryVariants(query) {
+function resolvePresetKey(normalized) {
+  if (normalized.includes("dress")) return "dresses";
+  if (normalized.includes("bodysuit")) return "bodysuits";
+  if (normalized.includes("bodycon")) return "bodycons";
+  if (normalized.includes("skirt")) return "skirts";
+  if (normalized.includes("top")) return "tops";
+  if (normalized.includes("pant") || normalized.includes("trouser")) return "pants";
+  if (normalized.includes("active")) return "activewear";
+  if (normalized.includes("outer") || normalized.includes("jacket") || normalized.includes("coat")) return "outerwear";
+  return normalized;
+}
+
+function buildQueryVariants(query, overrides = {}, competitorName = "") {
   const base = String(query || "").trim();
   if (!base) return [];
   const variants = new Set([base]);
@@ -428,6 +858,10 @@ function buildQueryVariants(query) {
   if (lower.endsWith("s")) variants.add(lower.slice(0, -1));
   if (lower.includes("&")) variants.add(lower.replace(/&/g, "and"));
   if (lower.includes(" and ")) variants.add(lower.replace(/ and /g, " & "));
+  const presetKey = resolvePresetKey(lower);
+  const globalPresets = overrides?.presets?.global?.[presetKey] || [];
+  const namePresets = overrides?.presets?.byName?.[competitorName]?.[presetKey] || [];
+  [...globalPresets, ...namePresets].forEach((term) => variants.add(term));
   return Array.from(variants);
 }
 
@@ -558,6 +992,7 @@ async function findShopifyCollections(website, query) {
 
 async function scrapeShopifyCollection(url, currency) {
   const parsed = new URL(url);
+  const storeCurrency = await fetchShopCurrency(parsed.origin);
   const collectionHandle = parsed.pathname.split("/collections/")[1]?.split("/")[0];
   if (!collectionHandle) {
     throw new Error("Invalid Shopify collection URL.");
@@ -587,15 +1022,18 @@ async function scrapeShopifyCollection(url, currency) {
 
     const mapped = data.products.map((p) => {
       const firstVariant = p.variants?.[0] || {};
+      const imageCandidate = p.image?.src || p.images?.[0]?.src || p.images?.[0] || null;
       return {
         title: p.title,
         price: firstVariant.price ? Number(firstVariant.price) : null,
         compareAtPrice: firstVariant.compare_at_price
           ? Number(firstVariant.compare_at_price)
           : null,
+        vendor: p.vendor || null,
+        image: normalizeImageUrl(parsed.origin, imageCandidate),
         images: p.images.map((img) => img.src),
         url: `${parsed.origin}/products/${p.handle}`,
-        currency: currency || null,
+        currency: storeCurrency || currency || null,
       };
     });
 
@@ -609,6 +1047,74 @@ async function scrapeShopifyCollection(url, currency) {
   return products;
 }
 
+function matchesAnyQueryVariant(product, variants) {
+  const title = String(product?.title || "").toLowerCase();
+  const handle = String(product?.handle || "").toLowerCase();
+  const vendor = String(product?.vendor || "").toLowerCase();
+  const productType = String(product?.product_type || "").toLowerCase();
+  const tags = Array.isArray(product?.tags) ? product.tags.join(" ").toLowerCase() : String(product?.tags || "").toLowerCase();
+  return variants.some((variant) => {
+    if (!variant) return false;
+    const needle = String(variant).toLowerCase();
+    return (
+      title.includes(needle) ||
+      handle.includes(needle) ||
+      vendor.includes(needle) ||
+      productType.includes(needle) ||
+      tags.includes(needle)
+    );
+  });
+}
+
+async function scrapeShopifyAllProducts(origin, queryVariants, currency, { maxPages = 8 } = {}) {
+  const storeCurrency = await fetchShopCurrency(origin);
+  const products = [];
+  let page = 1;
+  let hasMore = true;
+
+  while (hasMore && page <= maxPages) {
+    const apiUrl = `${origin}/products.json?limit=250&page=${page}`;
+    const response = await fetch(apiUrl, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept: "application/json,text/plain,*/*",
+      },
+    });
+    if (!response.ok) {
+      break;
+    }
+    const data = await response.json();
+    if (!data.products || data.products.length === 0) {
+      hasMore = false;
+      break;
+    }
+
+    for (const p of data.products) {
+      if (!matchesAnyQueryVariant(p, queryVariants)) continue;
+      const firstVariant = p.variants?.[0] || {};
+      const imageCandidate = p.image?.src || p.images?.[0]?.src || p.images?.[0] || null;
+      products.push({
+        title: p.title,
+        price: firstVariant.price ? Number(firstVariant.price) : null,
+        compareAtPrice: firstVariant.compare_at_price ? Number(firstVariant.compare_at_price) : null,
+        vendor: p.vendor || null,
+        image: normalizeImageUrl(origin, imageCandidate),
+        images: p.images.map((img) => img.src),
+        url: `${origin}/products/${p.handle}`,
+        currency: storeCurrency || currency || null,
+      });
+    }
+
+    if (data.products.length < 250) {
+      hasMore = false;
+    }
+    page += 1;
+  }
+
+  return products;
+}
+
 
 app.get("/", (req, res) => {
   res.send("Welcome to the Web Scraper API!");
@@ -616,6 +1122,31 @@ app.get("/", (req, res) => {
 
 app.get("/api/health", (req, res) => {
   res.status(200).json({ ok: true });
+});
+
+app.get("/api/dashboard/state", async (req, res) => {
+  try {
+    const store = await readStore();
+    res.status(200).json(store.dashboard || {});
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/dashboard/state", async (req, res) => {
+  try {
+    const store = await readStore();
+    const payload = req.body && typeof req.body === "object" ? req.body : {};
+    store.dashboard = {
+      ...(store.dashboard || {}),
+      ...payload,
+      updated_at: new Date().toISOString(),
+    };
+    await writeStore(store);
+    res.status(200).json(store.dashboard);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.post("/api/langflow/run", async (req, res) => {
@@ -816,109 +1347,175 @@ app.get("/api/competitors/:id/search", async (req, res) => {
       return res.status(404).json({ error: "Competitor not found." });
     }
 
-    let products = [];
-    const overrides = await loadCollectionOverrides();
-    const overrideCandidates = expandCollectionCandidates(
-      buildOverrideCandidates(competitor.website, competitor.name, query, overrides)
-    );
-    for (const candidate of overrideCandidates) {
-      try {
-        products = await scrapeShopifyCollection(candidate, competitor.currency);
-        if (products.length) break;
-      } catch {
-        // try next candidate
+    const products = [];
+    const seenUrls = new Set();
+    const isVivo = String(competitor.name || "").toLowerCase() === "vivo";
+    const maxResults = isVivo ? 600 : 200;
+
+    function addProducts(items) {
+      if (!Array.isArray(items) || !items.length) return;
+      for (const item of items) {
+        if (products.length >= maxResults) return;
+        const url = item?.url || item?.product_url || "";
+        const title = String(item?.title || item?.product_name || "").toLowerCase();
+        if (title.includes("add to cart")) continue;
+        if (!url) continue;
+        const key = String(url).split("?")[0];
+        if (seenUrls.has(key)) continue;
+        seenUrls.add(key);
+        products.push(item);
       }
     }
 
-    if (!products.length) {
+    const overrides = await loadCollectionOverrides();
+    const websites = getCompetitorWebsites(competitor);
+    const queryVariants = buildQueryVariants(query, overrides, competitor.name);
+
+    for (const website of websites) {
+      const overrideCandidates = expandCollectionCandidates(
+        buildOverrideCandidates(website, competitor.name, query, overrides)
+      );
       for (const candidate of overrideCandidates) {
         try {
-          products = await scrapeCollectionHtml(candidate);
-          if (products.length) break;
+          const found = await scrapeShopifyCollection(candidate, competitor.currency);
+          addProducts(found);
         } catch {
           // try next candidate
         }
       }
-    }
 
-    const collectionCandidates = expandCollectionCandidates(
-      buildCollectionCandidates(competitor.website, query)
-    );
-    for (const candidate of collectionCandidates) {
-      try {
-        products = await scrapeShopifyCollection(candidate, competitor.currency);
-        if (products.length) break;
-      } catch {
-        // try next candidate
+      for (const candidate of overrideCandidates) {
+        try {
+          const found = await scrapeCollectionHtml(candidate);
+          addProducts(found);
+        } catch {
+          // try next candidate
+        }
       }
-    }
 
-    if (!products.length) {
+      const collectionCandidates = expandCollectionCandidates(
+        buildCollectionCandidates(website, query)
+      );
       for (const candidate of collectionCandidates) {
         try {
-          products = await scrapeCollectionHtml(candidate);
-          if (products.length) break;
+          const found = await scrapeShopifyCollection(candidate, competitor.currency);
+          addProducts(found);
         } catch {
           // try next candidate
         }
       }
-    }
 
-    if (!products.length) {
-      const discoveredCollections = await findShopifyCollections(competitor.website, query);
+      for (const candidate of collectionCandidates) {
+        try {
+          const found = await scrapeCollectionHtml(candidate);
+          addProducts(found);
+        } catch {
+          // try next candidate
+        }
+      }
+
+      const discoveredCollections = await findShopifyCollections(website, query);
       const discoveredCandidates = expandCollectionCandidates(discoveredCollections);
       for (const candidate of discoveredCandidates) {
         try {
-          products = await scrapeShopifyCollection(candidate, competitor.currency);
-          if (products.length) break;
+          const found = await scrapeShopifyCollection(candidate, competitor.currency);
+          addProducts(found);
         } catch {
           // try next candidate
         }
       }
-    }
 
-    if (!products.length) {
-      const discoveredCollections = await findShopifyCollections(competitor.website, query);
-      const discoveredCandidates = expandCollectionCandidates(discoveredCollections);
       for (const candidate of discoveredCandidates) {
         try {
-          products = await scrapeCollectionHtml(candidate);
-          if (products.length) break;
+          const found = await scrapeCollectionHtml(candidate);
+          addProducts(found);
         } catch {
           // try next candidate
         }
       }
-    }
 
-    if (!products.length) {
-      const queryVariants = buildQueryVariants(query);
       for (const variant of queryVariants) {
         try {
-          products = await shopifySearchProducts(competitor.website, variant);
-          if (!products.length) {
-            products = await genericSearchProducts(competitor.website, variant);
-          }
+          const foundShopify = await shopifySearchProducts(website, variant);
+          addProducts(foundShopify);
+          const foundGeneric = await genericSearchProducts(website, variant);
+          addProducts(foundGeneric);
         } catch {
-          products = await genericSearchProducts(competitor.website, variant);
+          try {
+            const foundGeneric = await genericSearchProducts(website, variant);
+            addProducts(foundGeneric);
+          } catch {
+            // ignore
+          }
         }
-        if (products.length) break;
       }
     }
 
     if (!products.length) {
-      products = buildStoredSearchResults(
+      const stored = buildStoredSearchResults(
         store,
         competitor.id,
         query,
         competitor.currency
       );
+      addProducts(stored);
     }
-    const currency = competitor.currency || "USD";
-    const data = products.map((p) => ({
-      ...p,
-      brand: competitor.name,
-      currency,
-    }));
+
+    if (isVivo && products.length < maxResults) {
+      for (const website of websites) {
+        try {
+          const fallback = await scrapeShopifyAllProducts(
+            website,
+            queryVariants,
+            competitor.currency,
+            { maxPages: 12 }
+          );
+          addProducts(fallback);
+        } catch {
+          // ignore fallback errors
+        }
+      }
+    }
+
+    if (isVivo) {
+      const filtered = products.filter(isVivoBrandItem);
+      products.length = 0;
+      products.push(...filtered);
+    }
+    const storeCurrency = await fetchShopCurrency(competitor.website);
+    const currencySet = new Set([
+      competitor.currency,
+      storeCurrency,
+      ...products.map((p) => p.currency),
+    ]);
+    const fxRates = await fetchFxRatesToKes(Array.from(currencySet));
+    const data = products
+      .map((p) => {
+        const sourceCurrency = p.currency || storeCurrency || null;
+        const converted = applyKesConversion(p, sourceCurrency, fxRates);
+        return {
+          ...p,
+          brand: competitor.name,
+          ...converted,
+        };
+      })
+      .filter((item) => isProductUrl(item.url || item.product_url));
+
+    const missingImages = data.filter((item) => !item.image && item.url);
+    if (missingImages.length) {
+      const limit = missingImages.slice(0, 25);
+      await Promise.all(
+        limit.map(async (item) => {
+          let img = null;
+          if (isCollectionUrl(item.url)) {
+            img = await fetchCollectionImage(item.url);
+          } else if (isProductUrl(item.url)) {
+            img = await fetchProductImage(item.url);
+          }
+          if (img) item.image = img;
+        })
+      );
+    }
 
     let persisted = { created: 0, updated: 0, history: 0 };
     const persistFlag = String(req.query.persist || "").toLowerCase();
@@ -929,7 +1526,7 @@ app.get("/api/competitors/:id/search", async (req, res) => {
       const collectedDay = collectedAt.slice(0, 10);
       for (const item of data) {
         const productUrl = item.url || item.product_url || "";
-        if (!productUrl) continue;
+        if (!productUrl || !isProductUrl(productUrl)) continue;
         let product = store.products.find(
           (p) =>
             String(p.competitor_id) === String(competitor.id) &&
@@ -943,6 +1540,10 @@ app.get("/api/competitors/:id/search", async (req, res) => {
             product_name: String(item.title || item.product_name || "Unknown"),
             category: String(query || "General"),
             product_url: String(productUrl),
+            image:
+              item.image ||
+              (Array.isArray(item.images) ? item.images[0] : null) ||
+              null,
             currency: item.currency || competitor.currency || null,
             latest_price: null,
             latest_collected_at: null,
@@ -952,6 +1553,9 @@ app.get("/api/competitors/:id/search", async (req, res) => {
         } else {
           product.product_name = item.title || item.product_name || product.product_name;
           product.currency = item.currency || product.currency || competitor.currency || null;
+          if (!product.image && item.image) {
+            product.image = item.image;
+          }
           persisted.updated += 1;
         }
 
@@ -985,6 +1589,16 @@ app.get("/api/competitors/:id/search", async (req, res) => {
 
       await writeStore(store);
     }
+
+    store.dashboard = store.dashboard || {};
+    store.dashboard.search = {
+      competitor_id: competitor.id,
+      competitor_name: competitor.name,
+      query,
+      result: { success: true, count: data.length, data, failed: [] },
+      updated_at: new Date().toISOString(),
+    };
+    await writeStore(store);
 
     res.status(200).json({
       success: true,
@@ -1092,10 +1706,33 @@ app.get("/api/collections/scrape", async (req, res) => {
       const html = await response.text();
       products = extractGenericProductsFromHtml(url, html);
     }
+    const currencySet = new Set([currency, ...products.map((item) => item.currency)]);
+    const fxRates = await fetchFxRatesToKes(Array.from(currencySet));
+    const normalizedProducts = products.map((item) => {
+      const sourceCurrency = item.currency || currency || null;
+      const converted = applyKesConversion(item, sourceCurrency, fxRates);
+      return {
+        ...item,
+        ...converted,
+      };
+    });
+    const store = await readStore();
+    store.dashboard = store.dashboard || {};
+    store.dashboard.collection = {
+      url,
+      currency,
+      result: {
+        success: true,
+        count: normalizedProducts.length,
+        data: normalizedProducts,
+      },
+      updated_at: new Date().toISOString(),
+    };
+    await writeStore(store);
     res.status(200).json({
       success: true,
-      count: products.length,
-      data: products,
+      count: normalizedProducts.length,
+      data: normalizedProducts,
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1105,13 +1742,26 @@ app.get("/api/collections/scrape", async (req, res) => {
 app.get("/api/products", async (req, res) => {
   try {
     const store = await readStore();
-    const products = store.products.map((product) => {
+    const productEntries = store.products.filter((p) => isProductUrl(p.product_url));
+    const currencySet = new Set(productEntries.map((p) => p.currency).filter(Boolean));
+    const fxRates = await fetchFxRatesToKes(Array.from(currencySet));
+    const products = productEntries.map((product) => {
       const competitor = store.competitors.find(
         (c) => String(c.id) === String(product.competitor_id)
+      );
+      const sourceCurrency = product.currency || null;
+      const converted = applyKesConversion(
+        { price: product.latest_price, compareAtPrice: null, currency: sourceCurrency },
+        sourceCurrency,
+        fxRates
       );
       return {
         ...product,
         competitor_currency: competitor?.currency || null,
+        original_currency: converted.original_currency,
+        original_latest_price: converted.original_price,
+        currency: converted.currency || sourceCurrency,
+        latest_price: converted.price,
       };
     });
     res.status(200).json(products);
@@ -1125,6 +1775,9 @@ app.post("/api/products", async (req, res) => {
     const { competitor_id, product_name, category, product_url, currency } = req.body || {};
     if (!competitor_id || !product_name || !product_url) {
       return res.status(400).json({ error: "Missing required fields." });
+    }
+    if (!isProductUrl(product_url)) {
+      return res.status(400).json({ error: "Product URL must be a /products/ link." });
     }
 
     const store = await readStore();
@@ -1165,18 +1818,98 @@ app.get("/api/products/:id/history", async (req, res) => {
     const competitor = store.competitors.find(
       (c) => String(c.id) === String(product.competitor_id)
     );
+    const sourceCurrency = product.currency || null;
+    const fxRates = await fetchFxRatesToKes([sourceCurrency]);
 
     const points = store.history
       .filter((h) => h.product_id === id)
-      .sort((a, b) => new Date(a.collected_at) - new Date(b.collected_at));
+      .sort((a, b) => new Date(a.collected_at) - new Date(b.collected_at))
+      .map((point) => {
+        const converted = applyKesConversion(
+          { price: point.price, compareAtPrice: null, currency: sourceCurrency },
+          sourceCurrency,
+          fxRates
+        );
+        return {
+          ...point,
+          original_currency: converted.original_currency,
+          original_price: converted.original_price,
+          currency: converted.currency || sourceCurrency,
+          price: converted.price,
+        };
+      });
+
+    const productConverted = applyKesConversion(
+      { price: product.latest_price, compareAtPrice: null, currency: sourceCurrency },
+      sourceCurrency,
+      fxRates
+    );
 
     res.status(200).json({
       product: {
         ...product,
         competitor_currency: competitor?.currency || null,
+        original_currency: productConverted.original_currency,
+        original_latest_price: productConverted.original_price,
+        currency: productConverted.currency || sourceCurrency,
+        latest_price: productConverted.price,
       },
       points,
     });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get("/api/history/brands", async (req, res) => {
+  try {
+    const store = await readStore();
+    const category = String(req.query.category || "").trim();
+    const products = store.products.filter(
+      (product) =>
+        isProductUrl(product.product_url) &&
+        (!category || product.category === category)
+    );
+    const productById = new Map(products.map((product) => [product.id, product]));
+    const currencies = Array.from(
+      new Set(products.map((product) => product.currency).filter(Boolean))
+    );
+    const fxRates = await fetchFxRatesToKes(currencies);
+    const labelsSet = new Set();
+    const seriesMap = new Map();
+
+    for (const entry of store.history) {
+      const product = productById.get(entry.product_id);
+      if (!product) continue;
+      const converted = applyKesConversion(
+        { price: entry.price, compareAtPrice: null, currency: product.currency },
+        product.currency,
+        fxRates
+      );
+      const price = Number(converted.price);
+      if (!Number.isFinite(price)) continue;
+      const dateKey = new Date(entry.collected_at).toISOString().slice(0, 10);
+      labelsSet.add(dateKey);
+      const brand = product.competitor_name || "Unknown";
+      if (!seriesMap.has(brand)) seriesMap.set(brand, new Map());
+      const brandMap = seriesMap.get(brand);
+      const bucket = brandMap.get(dateKey) || { sum: 0, count: 0 };
+      bucket.sum += price;
+      bucket.count += 1;
+      brandMap.set(dateKey, bucket);
+    }
+
+    const labels = Array.from(labelsSet).sort();
+    const series = Array.from(seriesMap.entries()).map(([brand, brandMap]) => ({
+      brand,
+      data: labels.map((label) => {
+        const bucket = brandMap.get(label);
+        if (!bucket) return null;
+        return Number((bucket.sum / bucket.count).toFixed(2));
+      }),
+    }));
+
+    res.status(200).json({ labels, series, currency: "KES" });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1251,7 +1984,14 @@ app.get("/api/comparison", async (req, res) => {
     const store = await readStore();
     const base = req.query.base_competitor || "";
     const category = req.query.category || "";
-    const result = buildComparison(store, base, category);
+    const result = await buildComparison(store, base, category);
+    store.dashboard = store.dashboard || {};
+    store.dashboard.comparison = {
+      filters: { base_competitor: base, category },
+      result,
+      updated_at: new Date().toISOString(),
+    };
+    await writeStore(store);
     res.status(200).json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1270,7 +2010,6 @@ app.post("/api/live-compare", async (req, res) => {
     const failed = [];
     let baseFound = false;
     let basePrice = null;
-
     for (const competitor of store.competitors) {
       try {
         const result = await shopifySuggest(competitor.website, product_name);
@@ -1278,16 +2017,28 @@ app.post("/api/live-compare", async (req, res) => {
           failed.push({ competitor: competitor.name, error: "No match" });
           continue;
         }
+        const storeCurrency = await fetchShopCurrency(competitor.website);
+        const sourceCurrency = competitor.currency || storeCurrency || null;
+        const fxRates = await fetchFxRatesToKes([sourceCurrency]);
+        const converted = applyKesConversion(
+          { price: result.price, compareAtPrice: null, currency: sourceCurrency },
+          sourceCurrency,
+          fxRates
+        );
+        const displayPrice = converted.price ?? result.price;
 
         if (competitor.name === base_competitor) {
           baseFound = true;
-          basePrice = result.price;
+          basePrice = displayPrice;
         }
 
         matches.push({
           competitor: competitor.name,
           product_name: result.product_name,
-          price: result.price,
+          price: displayPrice,
+          currency: converted.currency || sourceCurrency || null,
+          original_currency: converted.original_currency,
+          original_price: converted.original_price,
           delta_vs_vivo: null,
           delta_pct_vs_vivo: null,
           product_url: result.product_url,
@@ -1307,8 +2058,17 @@ app.post("/api/live-compare", async (req, res) => {
       }
     }
 
+    store.dashboard = store.dashboard || {};
+    store.dashboard.live_compare = {
+      input: { product_name, base_competitor },
+      result: { base_found: baseFound, matches, failed },
+      updated_at: new Date().toISOString(),
+    };
+    await writeStore(store);
+
     res.status(200).json({
       base_found: baseFound,
+      base_currency: KES_BASE_CURRENCY,
       matches,
       failed,
     });

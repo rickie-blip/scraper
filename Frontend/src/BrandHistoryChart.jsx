@@ -35,7 +35,13 @@ function colorForLabel(label) {
   return BRAND_PALETTE[hash % BRAND_PALETTE.length];
 }
 
-export default function PriceChart({ points, productName, brand, currency = "KES" }) {
+function normalizeCurrency(value) {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (normalized === "KSH") return "KES";
+  return /^[A-Z]{3}$/.test(normalized) ? normalized : "KES";
+}
+
+export default function BrandHistoryChart({ labels, series, currency = "KES" }) {
   const canvasRef = useRef(null);
   const chartRef = useRef(null);
 
@@ -46,36 +52,42 @@ export default function PriceChart({ points, productName, brand, currency = "KES
       chartRef.current.destroy();
     }
 
-    const labels = points.map((p) => new Date(p.collected_at).toLocaleString());
-    const prices = points.map((p) => Math.max(0, Number(p.price) || 0));
-    const normalizedCurrency = String(currency || "").trim().toUpperCase();
-    const mappedCurrency = normalizedCurrency === "KSH" ? "KES" : normalizedCurrency;
-    const safeCurrency = /^[A-Z]{3}$/.test(mappedCurrency) ? mappedCurrency : "KES";
+    const safeCurrency = normalizeCurrency(currency);
     const currencyFormatter = new Intl.NumberFormat(undefined, {
       style: "currency",
       currency: safeCurrency,
     });
-    const lineColor = colorForLabel(brand || productName);
+
+    const datasets = series.map((item) => {
+      const color = colorForLabel(item.brand);
+      return {
+        label: item.brand,
+        data: (item.data || []).map((value) =>
+          value == null ? null : Math.max(0, Number(value) || 0)
+        ),
+        borderColor: color,
+        backgroundColor: `${color}33`,
+        tension: 0.25,
+        fill: false,
+        spanGaps: true,
+        pointRadius: 3,
+        pointHoverRadius: 4,
+      };
+    });
 
     chartRef.current = new Chart(canvasRef.current, {
       type: "line",
       data: {
         labels,
-        datasets: [
-          {
-            label: `${brand || productName || "Product"} Price`,
-            data: prices,
-            borderColor: lineColor,
-            backgroundColor: `${lineColor}33`,
-            tension: 0.25,
-            fill: true,
-          },
-        ],
+        datasets,
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         scales: {
+          x: {
+            grid: { display: false },
+          },
           y: {
             beginAtZero: true,
             suggestedMin: 0,
@@ -85,6 +97,9 @@ export default function PriceChart({ points, productName, brand, currency = "KES
           },
         },
         plugins: {
+          legend: {
+            position: "bottom",
+          },
           tooltip: {
             callbacks: {
               label: (context) => {
@@ -100,10 +115,10 @@ export default function PriceChart({ points, productName, brand, currency = "KES
     return () => {
       if (chartRef.current) chartRef.current.destroy();
     };
-  }, [points, productName, brand, currency]);
+  }, [labels, series, currency]);
 
-  if (!points.length) {
-    return <div className="text-muted">No price history for selected product.</div>;
+  if (!series.length || !labels.length) {
+    return <div className="text-muted">No history data yet.</div>;
   }
 
   return (

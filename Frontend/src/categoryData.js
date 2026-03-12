@@ -60,19 +60,6 @@ export const CATEGORY_TREE = [
       { value: "t-shirts & tank tops", label: "T-shirts & tank tops" },
     ],
   },
-  {
-    key: "innerwear",
-    label: "Innerwear",
-    subcategories: [
-      { value: "innerwear", label: "All innerwear" },
-      { value: "bra & panty sets", label: "Bra & panty sets" },
-      { value: "bralettes", label: "Bralettes" },
-      { value: "bras", label: "Bras" },
-      { value: "lingerie", label: "Lingerie" },
-      { value: "panties", label: "Panties" },
-      { value: "shapewear", label: "Shapewear" },
-    ],
-  },
 ];
 
 export function flattenCategoryOptions() {

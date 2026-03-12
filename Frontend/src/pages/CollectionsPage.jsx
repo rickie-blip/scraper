@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { loadPersistedState, savePersistedState } from "../utils/persist";
 import { downloadCsv } from "../utils/csv";
 
 const COLLECTION_PRESETS = [
@@ -31,10 +32,11 @@ const COLLECTION_PRESETS = [
 
 function normalizeCurrency(value) {
   const normalized = String(value || "").trim().toUpperCase();
-  return /^[A-Z]{3}$/.test(normalized) ? normalized : "USD";
+  if (normalized === "KSH") return "KES";
+  return /^[A-Z]{3}$/.test(normalized) ? normalized : "KES";
 }
 
-function formatPrice(value, currency = "USD") {
+function formatPrice(value, currency = "KES") {
   if (value == null || value === "") return "-";
   const numberValue = Number(value);
   if (!Number.isFinite(numberValue)) return String(value);
@@ -42,6 +44,25 @@ function formatPrice(value, currency = "USD") {
     style: "currency",
     currency: normalizeCurrency(currency),
   }).format(numberValue);
+}
+
+function formatPriceWithOriginal(item, displayCurrency) {
+  if (!displayCurrency) {
+    return item?.price == null || item?.price === "" ? "-" : String(item.price);
+  }
+  const main = formatPrice(item?.price, displayCurrency);
+  const originalCurrency = normalizeCurrency(item?.original_currency || "");
+  const originalPrice = item?.original_price;
+  if (
+    originalPrice != null &&
+    originalPrice !== "" &&
+    originalCurrency &&
+    originalCurrency !== normalizeCurrency(displayCurrency)
+  ) {
+    const original = formatPrice(originalPrice, originalCurrency);
+    return `${main} (${original})`;
+  }
+  return main;
 }
 
 export default function CollectionsPage() {
@@ -70,6 +91,14 @@ export default function CollectionsPage() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    const saved = loadPersistedState("collection");
+    if (!saved || collectionResult) return;
+    if (saved.url) setCollectionUrl(saved.url);
+    if (saved.currency) setCollectionCurrency(saved.currency);
+    if (saved.result) setCollectionResult(saved.result);
+  }, [collectionResult]);
 
   useEffect(() => {
     if (!selectedCompetitorId) return;
@@ -102,6 +131,12 @@ export default function CollectionsPage() {
         currency: collectionCurrency,
       });
       setCollectionResult(res);
+      savePersistedState("collection", {
+        url: collectionUrl,
+        currency: collectionCurrency,
+        result: res,
+        updated_at: new Date().toISOString(),
+      });
     } catch (err) {
       setCollectionError(err.message);
     } finally {
@@ -202,7 +237,7 @@ export default function CollectionsPage() {
                     )}
                   </td>
                   <td>{item.title}</td>
-                  <td>{formatPrice(item.price, item.currency)}</td>
+                  <td>{formatPriceWithOriginal(item, item.currency)}</td>
                   <td>{formatPrice(item.compareAtPrice, item.currency)}</td>
                   <td>
                     {item.url ? (

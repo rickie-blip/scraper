@@ -26,7 +26,30 @@ Chart.register(
 
 function normalizeCurrency(value) {
   const normalized = String(value || "").trim().toUpperCase();
-  return /^[A-Z]{3}$/.test(normalized) ? normalized : "USD";
+  if (normalized === "KSH") return "KES";
+  return /^[A-Z]{3}$/.test(normalized) ? normalized : "KES";
+}
+
+const BRAND_PALETTE = [
+  "#ff6b4a",
+  "#1f7cff",
+  "#14b8a6",
+  "#f59e0b",
+  "#7c3aed",
+  "#ec4899",
+  "#22c55e",
+  "#0ea5e9",
+  "#f97316",
+  "#334155",
+];
+
+function colorForLabel(label) {
+  const text = String(label || "");
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = (hash * 31 + text.charCodeAt(i)) % 997;
+  }
+  return BRAND_PALETTE[hash % BRAND_PALETTE.length];
 }
 
 export default function AverageComparisonChart({ rows, currency = "USD" }) {
@@ -42,10 +65,7 @@ export default function AverageComparisonChart({ rows, currency = "USD" }) {
 
     const labels = rows.map((row) => row.competitor);
     const values = rows.map((row) => row.avg_price ?? 0);
-    const overallAverage =
-      values.length > 0
-        ? values.reduce((sum, value) => sum + value, 0) / values.length
-        : 0;
+    const colors = labels.map((label) => colorForLabel(label));
     const safeCurrency = normalizeCurrency(currency);
     const currencyFormatter = new Intl.NumberFormat(undefined, {
       style: "currency",
@@ -58,31 +78,41 @@ export default function AverageComparisonChart({ rows, currency = "USD" }) {
         labels,
         datasets: [
           {
-            label: "Avg Price per Competitor",
+            label: "Average Price",
             data: values,
-            backgroundColor: "rgba(255, 107, 74, 0.65)",
-            borderColor: "rgba(255, 107, 74, 1)",
+            backgroundColor: colors,
+            borderColor: colors,
             borderWidth: 1,
-          },
-          {
-            type: "line",
-            label: "Category Average (All Competitors)",
-            data: labels.map(() => overallAverage),
-            borderColor: "rgba(31, 124, 255, 0.9)",
-            borderWidth: 2,
-            pointRadius: 0,
-            tension: 0.2,
+            borderRadius: 14,
+            barThickness: 60,
           },
         ],
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        layout: {
+          padding: { top: 2, left: 0, right: 0, bottom: 0 },
+        },
         scales: {
+          x: {
+            grid: {
+              display: false,
+            },
+          },
           y: {
+            grid: {
+              color: "rgba(148, 163, 184, 0.35)",
+              borderDash: [4, 4],
+            },
             ticks: {
               callback: (value) => currencyFormatter.format(value),
+              maxTicksLimit: 6,
+              autoSkip: true,
+              padding: 6,
             },
+            beginAtZero: true,
+            stepSize: 1000,
           },
         },
         plugins: {
@@ -108,6 +138,17 @@ export default function AverageComparisonChart({ rows, currency = "USD" }) {
   return (
     <div className="chart-wrap">
       <canvas ref={canvasRef} />
+      <div className="chart-legend">
+        {rows.map((row) => (
+          <div className="legend-item" key={row.competitor}>
+            <span
+              className="legend-swatch"
+              style={{ backgroundColor: colorForLabel(row.competitor) }}
+            />
+            <span>{row.competitor}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

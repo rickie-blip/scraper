@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { loadPersistedState, savePersistedState } from "../utils/persist";
 
 function normalizeCurrency(value) {
   const normalized = String(value || "").trim().toUpperCase();
-  return /^[A-Z]{3}$/.test(normalized) ? normalized : "USD";
+  if (normalized === "KSH") return "KES";
+  return /^[A-Z]{3}$/.test(normalized) ? normalized : "KES";
 }
 
-function formatPrice(value, currency = "USD") {
+function formatPrice(value, currency = "KES") {
   if (value == null || value === "") return "-";
   const numberValue = Number(value);
   if (!Number.isFinite(numberValue)) return String(value);
@@ -67,6 +69,29 @@ export default function Competitors() {
   useEffect(() => {
     loadTracker();
   }, []);
+
+  useEffect(() => {
+    const saved = loadPersistedState("competitors");
+    if (!saved) return;
+    if (saved.comparison?.filters) {
+      setComparisonFilters((prev) => ({
+        ...prev,
+        ...saved.comparison.filters,
+      }));
+    }
+    if (saved.comparison?.result && !comparisonData) {
+      setComparisonData(saved.comparison.result);
+    }
+    if (saved.live_compare?.input) {
+      setLiveCompareForm((prev) => ({
+        ...prev,
+        ...saved.live_compare.input,
+      }));
+    }
+    if (saved.live_compare?.result && !liveCompareResult) {
+      setLiveCompareResult(saved.live_compare.result);
+    }
+  }, [comparisonData, liveCompareResult]);
 
   async function onAddCompetitor(e) {
     e.preventDefault();
@@ -144,6 +169,15 @@ export default function Competitors() {
     try {
       const data = await api.getComparison(comparisonFilters);
       setComparisonData(data);
+      const saved = loadPersistedState("competitors") || {};
+      savePersistedState("competitors", {
+        ...saved,
+        comparison: {
+          filters: comparisonFilters,
+          result: data,
+          updated_at: new Date().toISOString(),
+        },
+      });
     } catch (err) {
       setError(err.message);
     }
@@ -157,6 +191,15 @@ export default function Competitors() {
     try {
       const res = await api.liveCompare(liveCompareForm);
       setLiveCompareResult(res);
+      const saved = loadPersistedState("competitors") || {};
+      savePersistedState("competitors", {
+        ...saved,
+        live_compare: {
+          input: liveCompareForm,
+          result: res,
+          updated_at: new Date().toISOString(),
+        },
+      });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -187,6 +230,7 @@ export default function Competitors() {
         </div>
       </div>
 
+      {/*
       <div className="split">
         <div className="card-block">
           <h5>Add Competitor</h5>
@@ -323,8 +367,10 @@ export default function Competitors() {
           </div>
         </div>
       </div>
+      */}
 
 
+      {/*
       <div className="card-block mt-3">
         <h5>Price Comparison</h5>
         <div className="row mb-3">
@@ -383,7 +429,9 @@ export default function Competitors() {
           </table>
         )}
       </div>
+      */}
 
+      {/*
       <div className="card-block mt-3">
         <h5>Live Product Compare</h5>
         <p className="text-muted">Search for a product across all competitors in real-time.</p>
@@ -464,6 +512,7 @@ export default function Competitors() {
           </div>
         )}
       </div>
+      */}
 
       {summary.latest_updates?.length > 0 && (
         <div className="card-block mt-3">

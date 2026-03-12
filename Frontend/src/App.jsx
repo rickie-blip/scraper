@@ -1,5 +1,5 @@
 import { NavLink, Route, Routes } from "react-router-dom";
-import CollectionsPage from "./pages/CollectionsPage";
+// import CollectionsPage from "./pages/CollectionsPage";
 import CompetitorsPage from "./pages/CompetitorsPage";
 import HomePage from "./pages/HomePage";
 import SearchPage from "./pages/SearchPage";
@@ -20,7 +20,9 @@ export default function App() {
             Home
           </NavLink>
           <NavLink to="/search">Search</NavLink>
+          {/*
           <NavLink to="/collections">Collections</NavLink>
+          */}
           <NavLink to="/competitors">Competitors</NavLink>
         </nav>
       </header>
@@ -28,7 +30,10 @@ export default function App() {
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/search" element={<SearchPage />} />
+        <Route path="/search/competitor/:id" element={<SearchPage />} />
+        {/*
         <Route path="/collections" element={<CollectionsPage />} />
+        */}
         <Route path="/competitors" element={<CompetitorsPage />} />
       </Routes>
     </div>

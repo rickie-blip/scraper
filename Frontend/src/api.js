@@ -37,12 +37,21 @@ export const api = {
   scrapeProduct: (productId) => apiRequest(`/products/${productId}/scrape`, { method: "POST" }),
   scrapeAll: () => apiRequest("/scrape/run", { method: "POST" }),
   getHistory: (productId) => apiRequest(`/products/${productId}/history`),
+  getBrandHistory: ({ category } = {}) => {
+    const params = new URLSearchParams();
+    if (category) params.set("category", category);
+    const suffix = params.toString();
+    return apiRequest(`/history/brands${suffix ? `?${suffix}` : ""}`);
+  },
   getComparison: ({ base_competitor, category }) => {
     const params = new URLSearchParams();
     if (base_competitor) params.set("base_competitor", base_competitor);
     if (category) params.set("category", category);
     return apiRequest(`/comparison?${params.toString()}`);
   },
+  getDashboardState: () => apiRequest("/dashboard/state"),
+  saveDashboardState: (payload) =>
+    apiRequest("/dashboard/state", { method: "POST", body: JSON.stringify(payload) }),
   liveCompare: (payload) => apiRequest("/live-compare", { method: "POST", body: JSON.stringify(payload) }),
   scrapeCollection: ({ url, currency }) => {
     const params = new URLSearchParams();

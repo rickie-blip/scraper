@@ -185,11 +185,30 @@ function findPriceInText(text) {
   return null;
 }
 
+function findCurrencyInText(text) {
+  if (!text) return null;
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (/(KES|KSH|KSh)/.test(cleaned)) return "KES";
+  if (/\bUSD\b/.test(cleaned)) return "USD";
+  if (/\bEUR\b/.test(cleaned) || /â‚¬/.test(cleaned)) return "EUR";
+  if (/\bGBP\b/.test(cleaned) || /Â£/.test(cleaned)) return "GBP";
+  if (/\$/.test(cleaned)) return "USD";
+  return null;
+}
+
 function extractGenericProductsFromHtml(baseUrl, html, limit = 200) {
   const $ = load(html);
   const baseOrigin = new URL(baseUrl).origin;
   const seen = new Set();
   const results = [];
+  const pageCurrency =
+    (String(
+      $('meta[property="product:price:currency"]').attr("content") ||
+        $('meta[property="og:price:currency"]').attr("content") ||
+        $('meta[itemprop="priceCurrency"]').attr("content") ||
+        ""
+    ).trim() || null) ||
+    findCurrencyInText($("body").text());
 
   const anchorNodes = $("a[href]").toArray();
   for (const node of anchorNodes) {
@@ -204,6 +223,8 @@ function extractGenericProductsFromHtml(baseUrl, html, limit = 200) {
     const container = $(node).closest("li, article, div");
     const containerText = container.text().replace(/\s+/g, " ").trim();
     const price = findPriceInText(containerText) ?? findPriceInText(anchorText);
+    const currency =
+      findCurrencyInText(containerText) ?? findCurrencyInText(anchorText) ?? pageCurrency;
 
     const img = $(node).find("img").first().length
       ? $(node).find("img").first()
@@ -225,6 +246,7 @@ function extractGenericProductsFromHtml(baseUrl, html, limit = 200) {
     results.push({
       title,
       price,
+      currency,
       image,
       url: abs,
     });

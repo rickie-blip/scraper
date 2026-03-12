@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
+import { loadPersistedState, savePersistedState } from "../utils/persist";
 import AverageComparisonChart from "../AverageComparisonChart";
+import BrandHistoryChart from "../BrandHistoryChart";
 import { flattenCategoryOptions } from "../categoryData";
 
 export default function HomePage() {
@@ -11,15 +13,19 @@ export default function HomePage() {
   const [comparisonError, setComparisonError] = useState("");
   const [baseCompetitor, setBaseCompetitor] = useState("");
   const [category, setCategory] = useState("dresses");
+  const [comparisonHydrated, setComparisonHydrated] = useState(false);
+  const [lastLoadedFilters, setLastLoadedFilters] = useState(null);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchMessage, setSearchMessage] = useState("");
-  const chartCurrency =
-    competitors.find((c) => c.name === baseCompetitor)?.currency ||
-    competitors[0]?.currency ||
-    "USD";
+  const [brandHistory, setBrandHistory] = useState([]);
+  const [brandHistoryLabels, setBrandHistoryLabels] = useState([]);
+  const [brandHistoryLoading, setBrandHistoryLoading] = useState(false);
+  const [brandHistoryError, setBrandHistoryError] = useState("");
+  const chartCurrency = comparison?.base_currency || "KES";
   function normalizeCurrency(value) {
     const normalized = String(value || "").trim().toUpperCase();
-    return /^[A-Z]{3}$/.test(normalized) ? normalized : "USD";
+    if (normalized === "KSH") return "KES";
+    return /^[A-Z]{3}$/.test(normalized) ? normalized : "KES";
   }
 
   function formatPrice(value, currency) {
@@ -59,6 +65,38 @@ export default function HomePage() {
     };
   }, []);
 
+  async function loadBrandHistory() {
+    setBrandHistoryLoading(true);
+    setBrandHistoryError("");
+    try {
+      const data = await api.getBrandHistory({ category });
+      setBrandHistoryLabels(data.labels || []);
+      setBrandHistory(data.series || []);
+    } catch (err) {
+      setBrandHistoryError(err.message);
+      setBrandHistoryLabels([]);
+      setBrandHistory([]);
+    } finally {
+      setBrandHistoryLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    const saved = loadPersistedState("home");
+    if (saved && !comparison) {
+      if (saved.category) setCategory(saved.category);
+      if (saved.base_competitor) setBaseCompetitor(saved.base_competitor);
+      if (saved.comparison) {
+        setComparison(saved.comparison);
+        setLastLoadedFilters({
+          category: saved.category || category,
+          base_competitor: saved.base_competitor || "",
+        });
+      }
+    }
+    setComparisonHydrated(true);
+  }, [comparison, category]);
+
   async function loadComparison({ persist = false } = {}) {
     setComparisonLoading(true);
     setComparisonError("");
@@ -90,7 +128,8 @@ export default function HomePage() {
         }
 
         const items = result.value?.data || [];
-        const prices = items
+        const limitedItems = items.slice(0, 20);
+        const prices = limitedItems
           .map((item) => Number(item.price))
           .filter((value) => Number.isFinite(value));
         const avg =
@@ -99,7 +138,7 @@ export default function HomePage() {
             : null;
         rows.push({
           competitor: competitor?.name || `Competitor ${index + 1}`,
-          items_count: items.length,
+          items_count: limitedItems.length,
           avg_price: avg != null ? Number(avg.toFixed(2)) : null,
           delta_vs_vivo: null,
           delta_pct_vs_vivo: null,
@@ -120,7 +159,15 @@ export default function HomePage() {
         }
       }
 
-      setComparison({ rows, failed });
+      const nextComparison = { rows, failed, base_currency: "KES" };
+      setComparison(nextComparison);
+      setLastLoadedFilters({ category, base_competitor: baseCompetitor });
+      savePersistedState("home", {
+        category,
+        base_competitor: baseCompetitor,
+        comparison: nextComparison,
+        updated_at: new Date().toISOString(),
+      });
     } catch (err) {
       setComparisonError(err.message);
     } finally {
@@ -129,9 +176,16 @@ export default function HomePage() {
   }
 
   useEffect(() => {
-    if (!category) return;
+    if (!comparisonHydrated || !category) return;
+    if (
+      lastLoadedFilters &&
+      lastLoadedFilters.category === category &&
+      lastLoadedFilters.base_competitor === baseCompetitor
+    ) {
+      return;
+    }
     loadComparison();
-  }, [category, baseCompetitor]);
+  }, [category, baseCompetitor, comparisonHydrated, lastLoadedFilters]);
 
   async function runSearch() {
     setSearchLoading(true);
@@ -145,6 +199,10 @@ export default function HomePage() {
       setSearchLoading(false);
     }
   }
+
+  useEffect(() => {
+    loadBrandHistory();
+  }, [category]);
 
   return (
     <div className="panel">
@@ -208,6 +266,7 @@ export default function HomePage() {
             value={category}
             onChange={(e) => setCategory(e.target.value)}
           >
+            <option value="">All categories</option>
             {categoryOptions.map(([groupLabel, options]) => (
               <optgroup key={groupLabel} label={groupLabel}>
                 {options.map((option) => (
@@ -252,7 +311,7 @@ export default function HomePage() {
                     <th>Competitor</th>
                     <th>Items</th>
                     <th>Average Price</th>
-                    <th>Delta vs Base</th>
+                    <th>Average Price</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -261,7 +320,7 @@ export default function HomePage() {
                       <td>{row.competitor}</td>
                       <td>{row.items_count}</td>
                       <td>{formatPrice(row.avg_price, chartCurrency)}</td>
-                      <td>{row.delta_vs_vivo != null ? formatPrice(row.delta_vs_vivo, chartCurrency) : "-"}</td>
+                      <td>{formatPrice(row.avg_price, chartCurrency)}</td>
                     </tr>
                   ))}
                   {!comparison.rows?.length && (
@@ -281,6 +340,35 @@ export default function HomePage() {
             )}
           </div>
         )}
+      </div>
+
+      <div className="card-block mt-4">
+        <div className="panel-head">
+          <div>
+            <h3>Brand Price History</h3>
+            <p>Average price trend per brand for the selected category.</p>
+          </div>
+        </div>
+        <div className="grid-row">
+          <button
+            className="btn btn-outline-primary"
+            type="button"
+            onClick={loadBrandHistory}
+            disabled={brandHistoryLoading}
+          >
+            {brandHistoryLoading ? "Loading..." : "Refresh History"}
+          </button>
+        </div>
+
+        {brandHistoryError && <div className="alert alert-warning mt-3">{brandHistoryError}</div>}
+
+        <div className="mt-3">
+          <BrandHistoryChart
+            labels={brandHistoryLabels}
+            series={brandHistory}
+            currency={chartCurrency}
+          />
+        </div>
       </div>
     </div>
   );

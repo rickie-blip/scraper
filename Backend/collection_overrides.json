@@ -1,14 +1,39 @@
 {
   "byHost": {
+    "leorana.com": {
+      "dresses": ["womens-dresses"],
+      "dress": ["womens-dresses"]
+    },
     "neviive.com": {
       "dresses": ["dresses"],
       "dress": ["dresses"]
     }
   },
   "byName": {
+    "Leorana": {
+      "dresses": ["womens-dresses"],
+      "dress": ["womens-dresses"]
+    },
     "Neviive": {
       "dresses": ["dresses"],
       "dress": ["dresses"]
+    }
+  },
+  "presets": {
+    "global": {
+      "dresses": ["dress", "dresses", "gown", "gowns", "evening dress", "maxi dress"],
+      "bodysuits": ["bodysuit", "bodysuits", "body suit", "body suits"],
+      "bodycons": ["bodycon", "body con", "body-cons", "bodycons"],
+      "tops": ["top", "tops", "blouse", "blouses"],
+      "skirts": ["skirt", "skirts"],
+      "pants": ["pant", "pants", "trouser", "trousers"],
+      "activewear": ["activewear", "athleisure", "sportswear"],
+      "outerwear": ["outerwear", "jacket", "jackets", "coat", "coats"]
+    },
+    "byName": {
+      "Diracfashion": {
+        "dresses": ["dresses", "womens dresses", "women dresses"]
+      }
     }
   }
 }
