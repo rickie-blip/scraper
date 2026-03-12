@@ -3,7 +3,10 @@ import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import { load } from "cheerio";
+import dotenv from "dotenv";
 import { scrapeCollection } from "./scraper.js";
+
+dotenv.config();
 
 const app = express();
 app.use(express.json());
@@ -28,10 +31,10 @@ const BRAND_CURRENCY = {
   Vivo: "KES",
   Nalani: "KES",
   Neviive: "KES",
-  Diracfashion: "GBP",
+  Diracfashion: "KES",
 };
 const HOST_CURRENCY_OVERRIDES = {
-  "diracfashion.com": "GBP",
+  "diracfashion.com": "KES",
 };
 const DEFAULT_COMPETITORS = [
   { name: "Vivo", website: "https://pay.shopzetu.com", currency: BRAND_CURRENCY.Vivo },
@@ -40,8 +43,36 @@ const DEFAULT_COMPETITORS = [
   { name: "Diracfashion", website: "https://diracfashion.com", currency: BRAND_CURRENCY.Diracfashion },
 ];
 
+function loadCompetitorsFromEnv() {
+  const raw = process.env.COMPETITORS_JSON;
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    const cleaned = parsed
+      .map((item) => ({
+        name: String(item?.name || "").trim(),
+        website: String(item?.website || "").trim(),
+        currency: item?.currency ? String(item.currency).trim().toUpperCase() : null,
+        website_aliases: Array.isArray(item?.website_aliases)
+          ? item.website_aliases.map((w) => String(w).trim()).filter(Boolean)
+          : undefined,
+      }))
+      .filter((item) => item.name && item.website);
+    return cleaned.length ? cleaned : null;
+  } catch {
+    return null;
+  }
+}
+
 function resolveBrandCurrency(brand) {
   return BRAND_CURRENCY[brand] || "USD";
+}
+
+function resolveForcedCurrency(competitorName, currency) {
+  const name = String(competitorName || "").toLowerCase();
+  if (name === "diracfashion") return "KES";
+  return currency;
 }
 
 function getCompetitorWebsites(competitor) {
@@ -100,11 +131,14 @@ async function ensureStore() {
     await fs.access(DATA_FILE);
   } catch {
     await fs.mkdir(DATA_DIR, { recursive: true });
-    const seededCompetitors = DEFAULT_COMPETITORS.map((c, idx) => ({
+    const envCompetitors = loadCompetitorsFromEnv();
+    const sourceCompetitors = envCompetitors || DEFAULT_COMPETITORS;
+    const seededCompetitors = sourceCompetitors.map((c, idx) => ({
       id: idx + 1,
       name: c.name,
       website: c.website,
       currency: c.currency || null,
+      website_aliases: c.website_aliases,
       created_at: new Date().toISOString(),
     }));
     const initial = {
@@ -121,8 +155,20 @@ async function ensureStore() {
 
 async function readStore() {
   await ensureStore();
-  const raw = await fs.readFile(DATA_FILE, "utf-8");
-  const store = JSON.parse(raw);
+  let raw = await fs.readFile(DATA_FILE, "utf-8");
+  let store;
+  try {
+    store = JSON.parse(raw);
+  } catch (err) {
+    const backupPath = `${DATA_FILE}.bak`;
+    try {
+      const backup = await fs.readFile(backupPath, "utf-8");
+      store = JSON.parse(backup);
+      await fs.writeFile(DATA_FILE, backup, "utf-8");
+    } catch {
+      throw err;
+    }
+  }
   if (!store.dashboard || typeof store.dashboard !== "object") {
     store.dashboard = {};
   }
@@ -132,11 +178,14 @@ async function readStore() {
     store.competitors.length === 0 &&
     !store.seeded
   ) {
-    const seededCompetitors = DEFAULT_COMPETITORS.map((c, idx) => ({
+    const envCompetitors = loadCompetitorsFromEnv();
+    const sourceCompetitors = envCompetitors || DEFAULT_COMPETITORS;
+    const seededCompetitors = sourceCompetitors.map((c, idx) => ({
       id: idx + 1,
       name: c.name,
       website: c.website,
       currency: c.currency || null,
+      website_aliases: c.website_aliases,
       created_at: new Date().toISOString(),
     }));
     store.competitors = seededCompetitors;
@@ -149,8 +198,8 @@ async function readStore() {
     for (const competitor of store.competitors) {
       if (String(competitor.name).toLowerCase() === "diracfashion") {
         const normalized = normalizeCurrencyCode(competitor.currency);
-        if (!normalized || normalized === "KES") {
-          competitor.currency = "GBP";
+        if (normalized !== "KES") {
+          competitor.currency = "KES";
           storeChanged = true;
         }
       }
@@ -160,8 +209,8 @@ async function readStore() {
     for (const product of store.products) {
       if (String(product.competitor_name).toLowerCase() === "diracfashion") {
         const normalized = normalizeCurrencyCode(product.currency);
-        if (!normalized || normalized === "KES") {
-          product.currency = "GBP";
+        if (normalized !== "KES") {
+          product.currency = "KES";
           storeChanged = true;
         }
       }
@@ -186,7 +235,16 @@ async function loadCollectionOverrides() {
 }
 
 async function writeStore(store) {
-  await fs.writeFile(DATA_FILE, JSON.stringify(store, null, 2), "utf-8");
+  const tmpPath = `${DATA_FILE}.tmp`;
+  const backupPath = `${DATA_FILE}.bak`;
+  const payload = JSON.stringify(store, null, 2);
+  try {
+    await fs.copyFile(DATA_FILE, backupPath);
+  } catch {
+    // ignore missing original
+  }
+  await fs.writeFile(tmpPath, payload, "utf-8");
+  await fs.rename(tmpPath, DATA_FILE);
 }
 
 function toNumber(value) {
@@ -313,6 +371,11 @@ const fxCache = {
   rates: { ...FX_DEFAULT_RATES },
   fetchedAt: {},
 };
+
+const SEARCH_CACHE_TTL_MS = 10 * 60 * 1000;
+const SEARCH_PAGE_SIZE_DEFAULT = 100;
+const SEARCH_PAGE_SIZE_MAX = 200;
+const searchCache = new Map();
 
 async function fetchFxRatesToKes(currencies = []) {
   const now = Date.now();
@@ -610,8 +673,19 @@ function extractGenericProductsFromHtml(baseUrl, html, limit = 200) {
     const img = $(node).find("img").first().length
       ? $(node).find("img").first()
       : container.find("img").first();
-    const rawImage =
+    let rawImage =
       img.attr("src") || img.attr("data-src") || img.attr("data-original") || null;
+    if (!rawImage) {
+      const host = new URL(baseUrl).host.toLowerCase();
+      if (host.includes("neviive")) {
+        const srcset = img.attr("data-srcset") || img.attr("srcset") || "";
+        const first = String(srcset)
+          .split(",")[0]
+          ?.trim()
+          .split(/\s+/)[0];
+        if (first) rawImage = first;
+      }
+    }
     const image = normalizeImageUrl(baseUrl, rawImage);
     const title =
       anchorText ||
@@ -674,7 +748,8 @@ async function buildComparison(store, baseCompetitor, category) {
     if (category && product.category !== category) continue;
     if (product.latest_price == null) continue;
     const competitor = competitorById.get(product.competitor_id);
-    const sourceCurrency = product.currency || competitor?.currency || null;
+    let sourceCurrency = product.currency || competitor?.currency || null;
+    sourceCurrency = resolveForcedCurrency(competitor?.name, sourceCurrency);
     if (sourceCurrency) currencySet.add(sourceCurrency);
     entries.push({
       competitor_name: product.competitor_name,
@@ -1347,10 +1422,55 @@ app.get("/api/competitors/:id/search", async (req, res) => {
       return res.status(404).json({ error: "Competitor not found." });
     }
 
+    const persistFlag = String(req.query.persist || "").toLowerCase();
+    const shouldPersist = persistFlag === "1" || persistFlag === "true" || persistFlag === "yes";
+    const refreshFlag = String(req.query.refresh || "").toLowerCase();
+    const shouldRefresh = refreshFlag === "1" || refreshFlag === "true" || refreshFlag === "yes";
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const pageSize = Math.max(
+      1,
+      Math.min(SEARCH_PAGE_SIZE_MAX, Number(req.query.page_size) || SEARCH_PAGE_SIZE_DEFAULT)
+    );
+    const cacheKey = `${competitor.id}:${String(query).toLowerCase()}`;
+    const cached = searchCache.get(cacheKey);
+
+    function buildPagedResponse(payload) {
+      const total = payload.data.length;
+      const start = (page - 1) * pageSize;
+      const paged = payload.data.slice(start, start + pageSize);
+      return {
+        ...payload,
+        data: paged,
+        count: paged.length,
+        total,
+        page,
+        page_size: pageSize,
+        has_more: start + pageSize < total,
+      };
+    }
+
+    const storeCache = store.dashboard?.search_cache?.[cacheKey];
+    if (!shouldRefresh) {
+      if (cached && Date.now() - cached.at < SEARCH_CACHE_TTL_MS) {
+        return res.status(200).json(buildPagedResponse(cached.payload));
+      }
+      if (storeCache && Date.now() - storeCache.at < SEARCH_CACHE_TTL_MS) {
+        const payload = {
+          success: true,
+          count: storeCache.data.length,
+          data: storeCache.data,
+          competitor: { id: competitor.id, name: competitor.name },
+          persisted: storeCache.persisted || { created: 0, updated: 0, history: 0 },
+        };
+        searchCache.set(cacheKey, { at: storeCache.at, payload });
+        return res.status(200).json(buildPagedResponse(payload));
+      }
+    }
+
     const products = [];
     const seenUrls = new Set();
     const isVivo = String(competitor.name || "").toLowerCase() === "vivo";
-    const maxResults = isVivo ? 600 : 200;
+    const maxResults = 200;
 
     function addProducts(items) {
       if (!Array.isArray(items) || !items.length) return;
@@ -1370,85 +1490,90 @@ app.get("/api/competitors/:id/search", async (req, res) => {
     const overrides = await loadCollectionOverrides();
     const websites = getCompetitorWebsites(competitor);
     const queryVariants = buildQueryVariants(query, overrides, competitor.name);
+    let scrapeError = null;
 
-    for (const website of websites) {
-      const overrideCandidates = expandCollectionCandidates(
-        buildOverrideCandidates(website, competitor.name, query, overrides)
-      );
-      for (const candidate of overrideCandidates) {
-        try {
-          const found = await scrapeShopifyCollection(candidate, competitor.currency);
-          addProducts(found);
-        } catch {
-          // try next candidate
-        }
-      }
-
-      for (const candidate of overrideCandidates) {
-        try {
-          const found = await scrapeCollectionHtml(candidate);
-          addProducts(found);
-        } catch {
-          // try next candidate
-        }
-      }
-
-      const collectionCandidates = expandCollectionCandidates(
-        buildCollectionCandidates(website, query)
-      );
-      for (const candidate of collectionCandidates) {
-        try {
-          const found = await scrapeShopifyCollection(candidate, competitor.currency);
-          addProducts(found);
-        } catch {
-          // try next candidate
-        }
-      }
-
-      for (const candidate of collectionCandidates) {
-        try {
-          const found = await scrapeCollectionHtml(candidate);
-          addProducts(found);
-        } catch {
-          // try next candidate
-        }
-      }
-
-      const discoveredCollections = await findShopifyCollections(website, query);
-      const discoveredCandidates = expandCollectionCandidates(discoveredCollections);
-      for (const candidate of discoveredCandidates) {
-        try {
-          const found = await scrapeShopifyCollection(candidate, competitor.currency);
-          addProducts(found);
-        } catch {
-          // try next candidate
-        }
-      }
-
-      for (const candidate of discoveredCandidates) {
-        try {
-          const found = await scrapeCollectionHtml(candidate);
-          addProducts(found);
-        } catch {
-          // try next candidate
-        }
-      }
-
-      for (const variant of queryVariants) {
-        try {
-          const foundShopify = await shopifySearchProducts(website, variant);
-          addProducts(foundShopify);
-          const foundGeneric = await genericSearchProducts(website, variant);
-          addProducts(foundGeneric);
-        } catch {
+    try {
+      for (const website of websites) {
+        const overrideCandidates = expandCollectionCandidates(
+          buildOverrideCandidates(website, competitor.name, query, overrides)
+        );
+        for (const candidate of overrideCandidates) {
           try {
+            const found = await scrapeShopifyCollection(candidate, competitor.currency);
+            addProducts(found);
+          } catch {
+            // try next candidate
+          }
+        }
+
+        for (const candidate of overrideCandidates) {
+          try {
+            const found = await scrapeCollectionHtml(candidate);
+            addProducts(found);
+          } catch {
+            // try next candidate
+          }
+        }
+
+        const collectionCandidates = expandCollectionCandidates(
+          buildCollectionCandidates(website, query)
+        );
+        for (const candidate of collectionCandidates) {
+          try {
+            const found = await scrapeShopifyCollection(candidate, competitor.currency);
+            addProducts(found);
+          } catch {
+            // try next candidate
+          }
+        }
+
+        for (const candidate of collectionCandidates) {
+          try {
+            const found = await scrapeCollectionHtml(candidate);
+            addProducts(found);
+          } catch {
+            // try next candidate
+          }
+        }
+
+        const discoveredCollections = await findShopifyCollections(website, query);
+        const discoveredCandidates = expandCollectionCandidates(discoveredCollections);
+        for (const candidate of discoveredCandidates) {
+          try {
+            const found = await scrapeShopifyCollection(candidate, competitor.currency);
+            addProducts(found);
+          } catch {
+            // try next candidate
+          }
+        }
+
+        for (const candidate of discoveredCandidates) {
+          try {
+            const found = await scrapeCollectionHtml(candidate);
+            addProducts(found);
+          } catch {
+            // try next candidate
+          }
+        }
+
+        for (const variant of queryVariants) {
+          try {
+            const foundShopify = await shopifySearchProducts(website, variant);
+            addProducts(foundShopify);
             const foundGeneric = await genericSearchProducts(website, variant);
             addProducts(foundGeneric);
           } catch {
-            // ignore
+            try {
+              const foundGeneric = await genericSearchProducts(website, variant);
+              addProducts(foundGeneric);
+            } catch {
+              // ignore
+            }
           }
         }
       }
+    } catch (err) {
+      scrapeError = err;
     }
 
     if (!products.length) {
@@ -1461,14 +1586,15 @@ app.get("/api/competitors/:id/search", async (req, res) => {
       addProducts(stored);
     }
 
-    if (isVivo && products.length < maxResults) {
+    if (products.length < maxResults) {
+      const fallbackPages = 2;
       for (const website of websites) {
         try {
           const fallback = await scrapeShopifyAllProducts(
             website,
             queryVariants,
             competitor.currency,
-            { maxPages: 12 }
+            { maxPages: fallbackPages }
           );
           addProducts(fallback);
         } catch {
@@ -1476,12 +1602,12 @@ app.get("/api/competitors/:id/search", async (req, res) => {
         }
       }
     }
-
     if (isVivo) {
       const filtered = products.filter(isVivoBrandItem);
       products.length = 0;
       products.push(...filtered);
     }
+
     const storeCurrency = await fetchShopCurrency(competitor.website);
     const currencySet = new Set([
       competitor.currency,
@@ -1491,7 +1617,8 @@ app.get("/api/competitors/:id/search", async (req, res) => {
     const fxRates = await fetchFxRatesToKes(Array.from(currencySet));
     const data = products
       .map((p) => {
-        const sourceCurrency = p.currency || storeCurrency || null;
+        let sourceCurrency = p.currency || storeCurrency || null;
+        sourceCurrency = resolveForcedCurrency(competitor.name, sourceCurrency);
         const converted = applyKesConversion(p, sourceCurrency, fxRates);
         return {
           ...p,
@@ -1518,9 +1645,6 @@ app.get("/api/competitors/:id/search", async (req, res) => {
     }
 
     let persisted = { created: 0, updated: 0, history: 0 };
-    const persistFlag = String(req.query.persist || "").toLowerCase();
-    const shouldPersist = persistFlag === "1" || persistFlag === "true" || persistFlag === "yes";
-
     if (shouldPersist) {
       const collectedAt = new Date().toISOString();
       const collectedDay = collectedAt.slice(0, 10);
@@ -1544,7 +1668,10 @@ app.get("/api/competitors/:id/search", async (req, res) => {
               item.image ||
               (Array.isArray(item.images) ? item.images[0] : null) ||
               null,
-            currency: item.currency || competitor.currency || null,
+            currency: resolveForcedCurrency(
+              competitor.name,
+              item.currency || competitor.currency || null
+            ),
             latest_price: null,
             latest_collected_at: null,
           };
@@ -1552,7 +1679,10 @@ app.get("/api/competitors/:id/search", async (req, res) => {
           persisted.created += 1;
         } else {
           product.product_name = item.title || item.product_name || product.product_name;
-          product.currency = item.currency || product.currency || competitor.currency || null;
+          product.currency = resolveForcedCurrency(
+            competitor.name,
+            item.currency || product.currency || competitor.currency || null
+          );
           if (!product.image && item.image) {
             product.image = item.image;
           }
@@ -1598,15 +1728,27 @@ app.get("/api/competitors/:id/search", async (req, res) => {
       result: { success: true, count: data.length, data, failed: [] },
       updated_at: new Date().toISOString(),
     };
-    await writeStore(store);
 
-    res.status(200).json({
+    const responsePayload = {
       success: true,
       count: data.length,
       data,
       competitor: { id: competitor.id, name: competitor.name },
       persisted,
-    });
+    };
+
+    const cacheEntry = { at: Date.now(), payload: responsePayload };
+    searchCache.set(cacheKey, cacheEntry);
+    store.dashboard = store.dashboard || {};
+    store.dashboard.search_cache = store.dashboard.search_cache || {};
+    store.dashboard.search_cache[cacheKey] = {
+      at: cacheEntry.at,
+      data,
+      persisted,
+    };
+    await writeStore(store);
+
+    res.status(200).json(buildPagedResponse(responsePayload));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1749,7 +1891,8 @@ app.get("/api/products", async (req, res) => {
       const competitor = store.competitors.find(
         (c) => String(c.id) === String(product.competitor_id)
       );
-      const sourceCurrency = product.currency || null;
+      let sourceCurrency = product.currency || null;
+      sourceCurrency = resolveForcedCurrency(competitor?.name, sourceCurrency);
       const converted = applyKesConversion(
         { price: product.latest_price, compareAtPrice: null, currency: sourceCurrency },
         sourceCurrency,
@@ -1818,7 +1961,8 @@ app.get("/api/products/:id/history", async (req, res) => {
     const competitor = store.competitors.find(
       (c) => String(c.id) === String(product.competitor_id)
     );
-    const sourceCurrency = product.currency || null;
+    let sourceCurrency = product.currency || null;
+    sourceCurrency = resolveForcedCurrency(competitor?.name, sourceCurrency);
     const fxRates = await fetchFxRatesToKes([sourceCurrency]);
 
     const points = store.history
@@ -1881,9 +2025,10 @@ app.get("/api/history/brands", async (req, res) => {
     for (const entry of store.history) {
       const product = productById.get(entry.product_id);
       if (!product) continue;
+      const forcedCurrency = resolveForcedCurrency(product.competitor_name, product.currency);
       const converted = applyKesConversion(
-        { price: entry.price, compareAtPrice: null, currency: product.currency },
-        product.currency,
+        { price: entry.price, compareAtPrice: null, currency: forcedCurrency },
+        forcedCurrency,
         fxRates
       );
       const price = Number(converted.price);

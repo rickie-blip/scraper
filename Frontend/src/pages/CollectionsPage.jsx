@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { loadPersistedState, savePersistedState } from "../utils/persist";
-import { downloadCsv } from "../utils/csv";
+import { downloadXlsx } from "../utils/xlsx";
 
 const COLLECTION_PRESETS = [
   {
@@ -146,14 +146,34 @@ export default function CollectionsPage() {
 
   function exportResults() {
     if (!collectionResult?.data?.length) return;
+    let brand = "";
+    const selectedCompetitor = competitors.find(
+      (item) => String(item.id) === String(selectedCompetitorId)
+    );
+    if (selectedCompetitor?.name) {
+      brand = selectedCompetitor.name;
+    } else {
+      try {
+        brand = new URL(collectionUrl).hostname;
+      } catch {
+        brand = "";
+      }
+    }
+    const categoryLabel = presetKey
+      ? COLLECTION_PRESETS.find((item) => item.key === presetKey)?.label || ""
+      : "";
     const rows = collectionResult.data.map((item) => ({
-      title: item.title,
-      price: item.price,
-      compareAtPrice: item.compareAtPrice,
-      image: item.images?.[0] || "",
-      url: item.url,
+      Brand: brand,
+      Category: categoryLabel,
+      "Product Image": item.images?.[0] || "",
+      "Product Link": item.url || "",
+      "Product Name": item.title || "",
+      Price: item.price ?? "",
     }));
-    downloadCsv(`collection-scrape.csv`, rows);
+    downloadXlsx(`collection-scrape.xlsx`, rows, {
+      sheetBy: "Category",
+      headers: ["Brand", "Category", "Product Image", "Product Link", "Product Name", "Price"],
+    });
   }
 
   return (
@@ -209,7 +229,7 @@ export default function CollectionsPage() {
 
       <div className="row-actions">
         <button className="btn btn-outline-primary btn-sm" onClick={exportResults} disabled={!collectionResult?.data?.length}>
-          Export CSV
+          Export Excel
         </button>
       </div>
 

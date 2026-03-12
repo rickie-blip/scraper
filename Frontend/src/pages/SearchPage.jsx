@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { loadPersistedState, savePersistedState } from "../utils/persist";
-import { downloadCsv } from "../utils/csv";
+import { downloadXlsx } from "../utils/xlsx";
 import { CATEGORY_TREE } from "../categoryData";
 
 function normalizeCurrency(value) {
@@ -40,13 +40,42 @@ function formatPriceWithOriginal(item, displayCurrency) {
   return main;
 }
 
+function extractImageUrl(value) {
+  if (!value) return null;
+  if (typeof value !== "string") return value;
+  const raw = value.trim();
+  if (!raw) return null;
+  if (!raw.includes("<")) {
+    const normalized = raw.startsWith("//") ? `https:${raw}` : raw;
+    return normalized.replace("{width}", "800").replace("%7Bwidth%7D", "800");
+  }
+  try {
+    const doc = new DOMParser().parseFromString(raw, "text/html");
+    const img = doc.querySelector("img");
+    if (img?.getAttribute("src")) {
+      const src = img.getAttribute("src").trim();
+      const normalized = src.startsWith("//") ? `https:${src}` : src;
+      return normalized.replace("{width}", "800").replace("%7Bwidth%7D", "800");
+    }
+  } catch {
+    // ignore
+  }
+  const match = raw.match(/\bsrc\s*=\s*["']([^"']+)["']/i);
+  if (match?.[1]) {
+    const src = match[1].trim();
+    const normalized = src.startsWith("//") ? `https:${src}` : src;
+    return normalized.replace("{width}", "800").replace("%7Bwidth%7D", "800");
+  }
+  return null;
+}
+
 function resolveImage(item) {
   if (!item) return null;
-  if (item.image) return item.image;
+  if (item.image) return extractImageUrl(item.image);
   if (Array.isArray(item.images)) {
     const first = item.images[0];
-    if (typeof first === "string") return first;
-    if (first?.src) return first.src;
+    if (typeof first === "string") return extractImageUrl(first);
+    if (first?.src) return extractImageUrl(first.src);
   }
   return null;
 }
@@ -58,7 +87,87 @@ function resolveCurrency(item, competitorByName, fallbackCurrency) {
   return brand?.currency || fallbackCurrency || null;
 }
 
-const PAGE_SIZE = 50;
+function sanitizeText(value) {
+  if (value == null) return "";
+  const raw = String(value);
+  if (!raw.includes("<")) return raw.trim();
+  let text = "";
+  try {
+    const doc = new DOMParser().parseFromString(raw, "text/html");
+    text = doc.body?.textContent?.trim() || "";
+  } catch {
+    text = "";
+  }
+  if (!text) {
+    const altMatch = raw.match(/\balt\s*=\s*["']([^"']+)["']/i);
+    if (altMatch) text = altMatch[1];
+  }
+  if (text) return text;
+  return raw.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function resolveTitle(item) {
+  const candidates = [item?.title, item?.product_name, item?.name];
+  for (const candidate of candidates) {
+    const text = sanitizeText(candidate || "");
+    if (!text) continue;
+    if (text.toLowerCase() === "new in") continue;
+    if (text.toLowerCase() === "product image") continue;
+    return text;
+  }
+  const url = String(item?.url || "").trim();
+  if (url) {
+    const slug = url.split("/").filter(Boolean).pop() || "";
+    if (slug) {
+      return slug
+        .replace(/[-_]+/g, " ")
+        .replace(/\b\w/g, (c) => c.toUpperCase())
+        .trim();
+    }
+  }
+  return "";
+}
+
+function normalizeBrand(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function filterItemsForCompetitor(items, competitorName) {
+  if (!Array.isArray(items) || !items.length) return [];
+  const target = normalizeBrand(competitorName);
+  if (!target) return items;
+  return items.filter((item) => normalizeBrand(item?.brand) === target);
+}
+
+function normalizeQuery(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function filterStoredProducts(products, { query, competitorName } = {}) {
+  if (!Array.isArray(products) || !products.length) return [];
+  const needle = normalizeQuery(query);
+  const target = normalizeBrand(competitorName);
+  return products.filter((item) => {
+    if (target && normalizeBrand(item?.competitor_name) !== target) return false;
+    if (!needle) return true;
+    const name = normalizeQuery(item?.product_name);
+    const category = normalizeQuery(item?.category);
+    return name.includes(needle) || category.includes(needle);
+  });
+}
+
+function limitItemsPerBrand(items, limit = 20) {
+  const counts = new Map();
+  const limited = [];
+  for (const item of items || []) {
+    const key = item?.brand || "Unknown";
+    const current = counts.get(key) || 0;
+    if (current >= limit) continue;
+    counts.set(key, current + 1);
+    limited.push(item);
+  }
+  return limited;
+}
 
 export default function SearchPage() {
   const { id: routeCompetitorId } = useParams();
@@ -75,10 +184,23 @@ export default function SearchPage() {
   const [searchResult, setSearchResult] = useState(null);
   const [searchError, setSearchError] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize] = useState(100);
   const [detailView, setDetailView] = useState(false);
   const categoryRef = useRef(null);
 
   const categories = CATEGORY_TREE;
+  const categoryLabelMap = useMemo(() => {
+    const map = new Map();
+    categories.forEach((item) => {
+      map.set(item.key, item.label);
+      if (item.subcategories?.length) {
+        item.subcategories.forEach((sub) => {
+          map.set(sub.value, sub.label);
+        });
+      }
+    });
+    return map;
+  }, [categories]);
   const competitorByName = useMemo(
     () => new Map(competitors.map((item) => [item.name, item])),
     [competitors]
@@ -104,15 +226,16 @@ export default function SearchPage() {
       });
   }, [searchResult]);
   const defaultCurrency = selectedCompetitor?.currency || null;
-  const totalPages = useMemo(
-    () => Math.max(1, Math.ceil((searchResult?.data?.length || 0) / PAGE_SIZE)),
-    [searchResult]
-  );
-  const pagedItems = useMemo(() => {
-    const items = searchResult?.data || [];
-    const start = (page - 1) * PAGE_SIZE;
-    return items.slice(start, start + PAGE_SIZE);
-  }, [page, searchResult]);
+  const totalPages = useMemo(() => {
+    const total = searchResult?.total ?? searchResult?.data?.length ?? 0;
+    return Math.max(1, Math.ceil(total / pageSize));
+  }, [searchResult, pageSize]);
+  const filteredItems = useMemo(() => {
+    if (!searchResult?.data?.length) return [];
+    if (searchCompetitorId === "all") return searchResult.data;
+    return filterItemsForCompetitor(searchResult.data, selectedCompetitor?.name);
+  }, [searchResult, searchCompetitorId, selectedCompetitor]);
+  const pagedItems = useMemo(() => filteredItems, [filteredItems]);
 
   useEffect(() => {
     let active = true;
@@ -182,17 +305,17 @@ export default function SearchPage() {
     };
   }, [categoryMenuOpen]);
 
-  async function runSearch({ persist = true } = {}) {
+  async function runSearch({ persist = true, refresh = false, nextPage = 1 } = {}) {
     setSearchLoading(true);
     setSearchError("");
     setSearchResult(null);
-    setPage(1);
+    setPage(nextPage);
     try {
       if (searchCompetitorId === "all") {
-        const requests = competitors.map((competitor) =>
-          api.searchCompetitor(competitor.id, searchQuery, { persist })
-        );
-        const results = await Promise.allSettled(requests);
+        if (!competitors.length) {
+          setSearchError("No competitors loaded yet. Refresh and try again.");
+          return;
+        }
         const combined = {
           success: true,
           count: 0,
@@ -200,17 +323,46 @@ export default function SearchPage() {
           failed: [],
         };
 
-        results.forEach((result, index) => {
-          if (result.status === "fulfilled") {
-            const payload = result.value;
+        for (const competitor of competitors) {
+          try {
+            const payload = await api.searchCompetitor(competitor.id, searchQuery, {
+              persist,
+              refresh,
+              page: 1,
+              page_size: pageSize,
+            });
             const items = payload?.data || [];
             combined.data.push(...items);
             combined.count += items.length;
-          } else {
-            combined.failed.push(competitors[index]?.name || `Competitor ${index + 1}`);
+          } catch {
+            combined.failed.push(competitor?.name || "Competitor");
           }
-        });
+        }
 
+        if (combined.data.length === 0) {
+          try {
+            const stored = await api.getProducts();
+            const fallback = filterStoredProducts(stored, { query: searchQuery });
+            if (fallback.length) {
+              combined.data = fallback.map((item) => ({
+                title: item.product_name,
+                price: item.latest_price ?? item.price ?? null,
+                image: item.image || null,
+                url: item.product_url,
+                currency: item.currency || null,
+                brand: item.competitor_name,
+              }));
+              combined.count = combined.data.length;
+              setSearchError("Live search failed. Showing stored products.");
+            } else if (combined.failed.length === competitors.length) {
+              setSearchError("All competitor searches failed. Try Refresh.");
+            }
+          } catch {
+            if (combined.failed.length === competitors.length) {
+              setSearchError("All competitor searches failed. Try Refresh.");
+            }
+          }
+        }
         setSearchResult(combined);
         savePersistedState("search", {
           competitor_id: "all",
@@ -220,7 +372,35 @@ export default function SearchPage() {
           updated_at: new Date().toISOString(),
         });
       } else {
-        const res = await api.searchCompetitor(searchCompetitorId, searchQuery, { persist });
+        const res = await api.searchCompetitor(searchCompetitorId, searchQuery, {
+          persist,
+          refresh,
+          page: nextPage,
+          page_size: pageSize,
+        });
+        if (!res?.data?.length) {
+          try {
+            const stored = await api.getProducts();
+            const fallback = filterStoredProducts(stored, {
+              query: searchQuery,
+              competitorName: selectedCompetitor?.name,
+            });
+            if (fallback.length) {
+              res.data = fallback.map((item) => ({
+                title: item.product_name,
+                price: item.latest_price ?? item.price ?? null,
+                image: item.image || null,
+                url: item.product_url,
+                currency: item.currency || null,
+                brand: item.competitor_name,
+              }));
+              res.count = res.data.length;
+              setSearchError("Live search failed. Showing stored products.");
+            }
+          } catch {
+            // ignore fallback errors
+          }
+        }
         setSearchResult(res);
         savePersistedState("search", {
           competitor_id: searchCompetitorId,
@@ -238,26 +418,54 @@ export default function SearchPage() {
 
   async function onSearchSubmit(e) {
     e.preventDefault();
-    await runSearch({ persist: true });
+    await runSearch({ persist: true, refresh: false, nextPage: 1 });
   }
 
   useEffect(() => {
     if (!detailView) return;
     if (!routeCompetitorId || !routeQuery) return;
-    runSearch({ persist: false });
+    runSearch({ persist: false, refresh: false, nextPage: 1 });
   }, [detailView, routeCompetitorId, routeQuery]);
 
-  function exportResults() {
+  async function exportResults() {
     if (!searchResult?.data?.length) return;
-    const rows = searchResult.data.map((item) => ({
-      brand: item.brand,
-      title: item.title,
-      price: item.price,
-      image: resolveImage(item),
-      url: item.url,
+    const categoryLabel =
+      (subcategory && categoryLabelMap.get(subcategory)) ||
+      (category && categoryLabelMap.get(category)) ||
+      (category ? category : "All categories");
+    let allItems = searchResult.data || [];
+    if (searchCompetitorId !== "all") {
+      const collected = [];
+      let currentPage = 1;
+      let hasMore = true;
+      while (hasMore) {
+        const payload = await api.searchCompetitor(searchCompetitorId, searchQuery, {
+          persist: false,
+          refresh: false,
+          page: currentPage,
+          page_size: pageSize,
+        });
+        collected.push(...(payload?.data || []));
+        hasMore = payload?.has_more;
+        currentPage += 1;
+        if (!payload?.data?.length) break;
+      }
+      allItems = collected;
+    }
+    const exportItems = searchCompetitorId === "all" ? limitItemsPerBrand(allItems, 20) : allItems;
+    const rows = exportItems.map((item) => ({
+      Brand: item.brand || "",
+      Category: categoryLabel || "",
+      "Product Image": resolveImage(item) || "",
+      "Product Link": item.url || "",
+      "Product Name": resolveTitle(item),
+      Price: item.price ?? "",
     }));
     const label = searchCompetitorId === "all" ? "all-competitors" : searchCompetitorId || "competitor";
-    downloadCsv(`search-${label}.csv`, rows);
+    downloadXlsx(`search-${label}.xlsx`, rows, {
+      sheetBy: "Category",
+      headers: ["Brand", "Category", "Product Image", "Product Link", "Product Name", "Price"],
+    });
   }
 
   return (
@@ -279,7 +487,7 @@ export default function SearchPage() {
               Back to Search
             </Link>
             <button className="btn btn-outline-primary" onClick={exportResults} disabled={!searchResult?.data?.length}>
-              Export CSV
+              Export Excel
             </button>
           </div>
         )}
@@ -374,20 +582,28 @@ export default function SearchPage() {
           placeholder="Search keyword or category"
           required
         />
-        <button
-          className="btn btn-primary"
-          type="submit"
-          disabled={searchLoading || !searchCompetitorId}
-        >
-          {searchLoading ? "Searching..." : "Run Search"}
-        </button>
+            <button
+              className="btn btn-primary"
+              type="submit"
+              disabled={searchLoading || !searchCompetitorId}
+            >
+              {searchLoading ? "Searching..." : "Run Search"}
+            </button>
+            <button
+              className="btn btn-outline-primary"
+              type="button"
+              onClick={() => runSearch({ persist: true, refresh: true, nextPage: 1 })}
+              disabled={searchLoading || !searchCompetitorId}
+            >
+              Refresh
+            </button>
         </form>
       )}
 
       {!detailView && (
         <div className="row-actions">
           <button className="btn btn-outline-primary btn-sm" onClick={exportResults} disabled={!searchResult?.data?.length}>
-            Export CSV
+            Export Excel
           </button>
         </div>
       )}
@@ -399,13 +615,13 @@ export default function SearchPage() {
             <>
               <div className="table-actions">
                 <div className="muted">
-                  Showing {pagedItems.length} of {searchResult.data?.length || 0} items
+                  Showing {pagedItems.length} of {(filteredItems.length) || 0} items
                 </div>
-                {searchResult.data?.length > PAGE_SIZE && (
+                {(filteredItems.length || 0) > pageSize && (
                   <div className="pager">
                     <button
                       className="btn btn-outline-secondary btn-sm"
-                      onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                      onClick={() => runSearch({ persist: false, refresh: false, nextPage: Math.max(1, page - 1) })}
                       disabled={page <= 1}
                     >
                       Prev
@@ -415,7 +631,7 @@ export default function SearchPage() {
                     </span>
                     <button
                       className="btn btn-outline-secondary btn-sm"
-                      onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                      onClick={() => runSearch({ persist: false, refresh: false, nextPage: Math.min(totalPages, page + 1) })}
                       disabled={page >= totalPages}
                     >
                       Next
@@ -437,19 +653,20 @@ export default function SearchPage() {
                   <tbody>
                     {pagedItems.map((item, idx) => {
                       const imageUrl = resolveImage(item);
-                      const displayCurrency = resolveCurrency(item, competitorByName, defaultCurrency);
-                      return (
-                        <tr key={`${item.url}-${idx}`}>
-                          <td>
-                            {imageUrl ? (
-                              <img className="thumb" src={imageUrl} alt={item.title} />
-                            ) : (
-                              "-"
-                            )}
-                          </td>
-                          <td>{item.title}</td>
-                          <td>{item.brand}</td>
-                          <td>{formatPriceWithOriginal(item, displayCurrency)}</td>
+                  const displayCurrency = resolveCurrency(item, competitorByName, defaultCurrency);
+                  const displayTitle = resolveTitle(item);
+                  return (
+                    <tr key={`${item.url}-${idx}`}>
+                      <td>
+                        {imageUrl ? (
+                          <img className="thumb" src={imageUrl} alt={displayTitle || "Product image"} />
+                        ) : (
+                          "-"
+                        )}
+                      </td>
+                      <td>{displayTitle || "-"}</td>
+                      <td>{item.brand}</td>
+                      <td>{formatPriceWithOriginal(item, displayCurrency)}</td>
                           <td>
                             {item.url ? (
                               <a href={item.url} rel="noreferrer" target="_blank">
@@ -503,17 +720,18 @@ export default function SearchPage() {
                           competitorByName,
                           defaultCurrency
                         );
+                        const displayTitle = resolveTitle(item);
                         return (
                           <div className="product-card" key={`${item.url}-${idx}`}>
                             <div className="product-media">
                               {imageUrl ? (
-                                <img src={imageUrl} alt={item.title} loading="lazy" />
+                                <img src={imageUrl} alt={displayTitle || "Product image"} loading="lazy" />
                               ) : (
                                 <div className="product-placeholder">No image</div>
                               )}
                             </div>
                             <div className="product-body">
-                              <div className="product-title">{item.title}</div>
+                              <div className="product-title">{displayTitle || "-"}</div>
                               <div className="product-price">
                                 {formatPriceWithOriginal(item, displayCurrency)}
                               </div>
@@ -558,17 +776,18 @@ export default function SearchPage() {
                 {searchResult.data?.slice(0, 10).map((item, idx) => {
                   const imageUrl = resolveImage(item);
                   const displayCurrency = resolveCurrency(item, competitorByName, defaultCurrency);
+                  const displayTitle = resolveTitle(item);
                   return (
                     <div className="product-card" key={`${item.url}-${idx}`}>
                       <div className="product-media">
                         {imageUrl ? (
-                          <img src={imageUrl} alt={item.title} loading="lazy" />
+                          <img src={imageUrl} alt={displayTitle || "Product image"} loading="lazy" />
                         ) : (
                           <div className="product-placeholder">No image</div>
                         )}
                       </div>
                       <div className="product-body">
-                        <div className="product-title">{item.title}</div>
+                        <div className="product-title">{displayTitle || "-"}</div>
                         <div className="product-price">
                           {formatPriceWithOriginal(item, displayCurrency)}
                         </div>

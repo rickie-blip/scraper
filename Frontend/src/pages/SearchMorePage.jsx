@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api";
-import { downloadCsv } from "../utils/csv";
+import { downloadXlsx } from "../utils/xlsx";
 
 function normalizeCurrency(value) {
   const normalized = String(value || "").trim().toUpperCase();
@@ -38,39 +38,120 @@ function formatPriceWithOriginal(item, displayCurrency) {
   return main;
 }
 
-function resolveImage(item) {
-  if (!item) return null;
-  if (item.image) return item.image;
-  if (Array.isArray(item.images)) {
-    const first = item.images[0];
-    if (typeof first === "string") return first;
-    if (first?.src) return first.src;
+function extractImageUrl(value) {
+  if (!value) return null;
+  if (typeof value !== "string") return value;
+  const raw = value.trim();
+  if (!raw) return null;
+  if (!raw.includes("<")) {
+    const normalized = raw.startsWith("//") ? `https:${raw}` : raw;
+    return normalized.replace("{width}", "800").replace("%7Bwidth%7D", "800");
+  }
+  try {
+    const doc = new DOMParser().parseFromString(raw, "text/html");
+    const img = doc.querySelector("img");
+    if (img?.getAttribute("src")) {
+      const src = img.getAttribute("src").trim();
+      const normalized = src.startsWith("//") ? `https:${src}` : src;
+      return normalized.replace("{width}", "800").replace("%7Bwidth%7D", "800");
+    }
+  } catch {
+    // ignore
+  }
+  const match = raw.match(/\bsrc\s*=\s*["']([^"']+)["']/i);
+  if (match?.[1]) {
+    const src = match[1].trim();
+    const normalized = src.startsWith("//") ? `https:${src}` : src;
+    return normalized.replace("{width}", "800").replace("%7Bwidth%7D", "800");
   }
   return null;
 }
 
-const PAGE_SIZE = 50;
+function resolveImage(item) {
+  if (!item) return null;
+  if (item.image) return extractImageUrl(item.image);
+  if (Array.isArray(item.images)) {
+    const first = item.images[0];
+    if (typeof first === "string") return extractImageUrl(first);
+    if (first?.src) return extractImageUrl(first.src);
+  }
+  return null;
+}
+
+function sanitizeText(value) {
+  if (value == null) return "";
+  const raw = String(value);
+  if (!raw.includes("<")) return raw.trim();
+  let text = "";
+  try {
+    const doc = new DOMParser().parseFromString(raw, "text/html");
+    text = doc.body?.textContent?.trim() || "";
+  } catch {
+    text = "";
+  }
+  if (!text) {
+    const altMatch = raw.match(/\balt\s*=\s*["']([^"']+)["']/i);
+    if (altMatch) text = altMatch[1];
+  }
+  if (text) return text;
+  return raw.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function resolveTitle(item) {
+  const candidates = [item?.title, item?.product_name, item?.name];
+  for (const candidate of candidates) {
+    const text = sanitizeText(candidate || "");
+    if (!text) continue;
+    if (text.toLowerCase() === "new in") continue;
+    if (text.toLowerCase() === "product image") continue;
+    return text;
+  }
+  const url = String(item?.url || "").trim();
+  if (url) {
+    const slug = url.split("/").filter(Boolean).pop() || "";
+    if (slug) {
+      return slug
+        .replace(/[-_]+/g, " ")
+        .replace(/\b\w/g, (c) => c.toUpperCase())
+        .trim();
+    }
+  }
+  return "";
+}
+
+function normalizeBrand(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function filterItemsForCompetitor(items, competitorName) {
+  if (!Array.isArray(items) || !items.length) return [];
+  const target = normalizeBrand(competitorName);
+  if (!target) return items;
+  return items.filter((item) => normalizeBrand(item?.brand) === target);
+}
 
 export default function SearchMorePage() {
   const { id } = useParams();
   const [params] = useSearchParams();
   const query = params.get("q") || "";
 
-  const [results, setResults] = useState([]);
+  const [results, setResults] = useState({});
   const [brand, setBrand] = useState("");
   const [competitorCurrency, setCompetitorCurrency] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize] = useState(100);
 
-  const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(results.length / PAGE_SIZE)),
-    [results.length]
-  );
-  const pagedItems = useMemo(() => {
-    const start = (page - 1) * PAGE_SIZE;
-    return results.slice(start, start + PAGE_SIZE);
-  }, [page, results]);
+  const totalPages = useMemo(() => {
+    const total = results?.total ?? results?.data?.length ?? 0;
+    return Math.max(1, Math.ceil(total / pageSize));
+  }, [results, pageSize]);
+  const filteredItems = useMemo(() => {
+    if (!results?.data?.length) return [];
+    return filterItemsForCompetitor(results.data, brand);
+  }, [results, brand]);
+  const pagedItems = useMemo(() => filteredItems, [filteredItems]);
 
   useEffect(() => {
     let active = true;
@@ -78,10 +159,10 @@ export default function SearchMorePage() {
     setLoading(true);
     setError("");
     api
-      .searchCompetitor(id, query, { persist: false })
+      .searchCompetitor(id, query, { persist: false, page: 1, page_size: pageSize })
       .then((res) => {
         if (!active) return;
-        setResults(res.data || []);
+        setResults(res || {});
         setBrand(res.data?.[0]?.brand || "");
         setPage(1);
       })
@@ -118,16 +199,35 @@ export default function SearchMorePage() {
     };
   }, [id]);
 
-  function exportResults() {
-    if (!results.length) return;
-    const rows = results.map((item) => ({
-      brand: item.brand,
-      title: item.title,
-      price: item.price,
-      image: resolveImage(item),
-      url: item.url,
+  async function exportResults() {
+    if (!results?.data?.length) return;
+    const collected = [];
+    let currentPage = 1;
+    let hasMore = true;
+    while (hasMore) {
+      const payload = await api.searchCompetitor(id, query, {
+        persist: false,
+        refresh: false,
+        page: currentPage,
+        page_size: pageSize,
+      });
+      collected.push(...(payload?.data || []));
+      hasMore = payload?.has_more;
+      currentPage += 1;
+      if (!payload?.data?.length) break;
+    }
+    const rows = collected.map((item) => ({
+      Brand: item.brand || brand || "",
+      Category: query || "",
+      "Product Image": resolveImage(item) || "",
+      "Product Link": item.url || "",
+      "Product Name": resolveTitle(item),
+      Price: item.price ?? "",
     }));
-    downloadCsv(`search-${id || "competitor"}-full.csv`, rows);
+    downloadXlsx(`search-${id || "competitor"}-full.xlsx`, rows, {
+      sheetBy: "Category",
+      headers: ["Brand", "Category", "Product Image", "Product Link", "Product Name", "Price"],
+    });
   }
 
   return (
@@ -143,8 +243,27 @@ export default function SearchMorePage() {
           <Link className="btn btn-outline-secondary" to="/search">
             Back to Search
           </Link>
-          <button className="btn btn-outline-primary" onClick={exportResults} disabled={!results.length}>
-            Export CSV
+          <button
+            className="btn btn-outline-primary"
+            onClick={() => {
+              setLoading(true);
+              setError("");
+              api
+                .searchCompetitor(id, query, { persist: true, refresh: true, page: 1, page_size: pageSize })
+                .then((res) => {
+                  setResults(res || {});
+                  setBrand(res.data?.[0]?.brand || brand || "");
+                  setPage(1);
+                })
+                .catch((err) => setError(err.message || "Search failed."))
+                .finally(() => setLoading(false));
+            }}
+            disabled={!id || !query}
+          >
+            Refresh
+          </button>
+          <button className="btn btn-outline-primary" onClick={exportResults} disabled={!results?.data?.length}>
+            Export Excel
           </button>
         </div>
       </div>
@@ -156,13 +275,25 @@ export default function SearchMorePage() {
         <>
           <div className="table-actions">
             <div className="muted">
-              Showing {pagedItems.length} of {results.length} items
+              Showing {pagedItems.length} of {results?.total ?? pagedItems.length} items
             </div>
-            {results.length > PAGE_SIZE && (
+            {(results?.total ?? 0) > pageSize && (
               <div className="pager">
                 <button
                   className="btn btn-outline-secondary btn-sm"
-                  onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                  onClick={() =>
+                    api
+                      .searchCompetitor(id, query, {
+                        persist: false,
+                        refresh: false,
+                        page: Math.max(1, page - 1),
+                        page_size: pageSize,
+                      })
+                      .then((res) => {
+                        setResults(res || {});
+                        setPage((prev) => Math.max(1, prev - 1));
+                      })
+                  }
                   disabled={page <= 1}
                 >
                   Prev
@@ -172,7 +303,19 @@ export default function SearchMorePage() {
                 </span>
                 <button
                   className="btn btn-outline-secondary btn-sm"
-                  onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                  onClick={() =>
+                    api
+                      .searchCompetitor(id, query, {
+                        persist: false,
+                        refresh: false,
+                        page: Math.min(totalPages, page + 1),
+                        page_size: pageSize,
+                      })
+                      .then((res) => {
+                        setResults(res || {});
+                        setPage((prev) => Math.min(totalPages, prev + 1));
+                      })
+                  }
                   disabled={page >= totalPages}
                 >
                   Next
@@ -194,16 +337,17 @@ export default function SearchMorePage() {
               <tbody>
                 {pagedItems.map((item, idx) => {
                   const imageUrl = resolveImage(item);
+                  const displayTitle = resolveTitle(item);
                   return (
                     <tr key={`${item.url}-${idx}`}>
                       <td>
                         {imageUrl ? (
-                          <img className="thumb" src={imageUrl} alt={item.title} />
+                          <img className="thumb" src={imageUrl} alt={displayTitle || "Product image"} />
                         ) : (
                           "-"
                         )}
                       </td>
-                      <td>{item.title}</td>
+                      <td>{displayTitle || "-"}</td>
                       <td>{item.brand}</td>
                       <td>
                         {formatPriceWithOriginal(

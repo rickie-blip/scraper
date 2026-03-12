@@ -29,6 +29,9 @@ export const api = {
     const params = new URLSearchParams();
     if (query) params.set("q", query);
     if (options.persist) params.set("persist", "1");
+    if (options.refresh) params.set("refresh", "1");
+    if (options.page) params.set("page", String(options.page));
+    if (options.page_size) params.set("page_size", String(options.page_size));
     return apiRequest(`/competitors/${id}/search?${params.toString()}`);
   },
   getSearchPresets: (id) => apiRequest(`/competitors/${id}/presets`),

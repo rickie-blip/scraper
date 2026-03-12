@@ -17,10 +17,10 @@ export default function HomePage() {
   const [lastLoadedFilters, setLastLoadedFilters] = useState(null);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchMessage, setSearchMessage] = useState("");
-  const [brandHistory, setBrandHistory] = useState([]);
-  const [brandHistoryLabels, setBrandHistoryLabels] = useState([]);
-  const [brandHistoryLoading, setBrandHistoryLoading] = useState(false);
-  const [brandHistoryError, setBrandHistoryError] = useState("");
+  const [priceSeries, setPriceSeries] = useState([]);
+  const [priceLabels, setPriceLabels] = useState([]);
+  const [priceSeriesLoading, setPriceSeriesLoading] = useState(false);
+  const [priceSeriesError, setPriceSeriesError] = useState("");
   const chartCurrency = comparison?.base_currency || "KES";
   function normalizeCurrency(value) {
     const normalized = String(value || "").trim().toUpperCase();
@@ -36,6 +36,10 @@ export default function HomePage() {
       style: "currency",
       currency: safeCurrency,
     }).format(num);
+  }
+
+  function normalizeName(value) {
+    return String(value || "").trim().toLowerCase();
   }
 
   const categoryOptions = useMemo(() => {
@@ -65,28 +69,13 @@ export default function HomePage() {
     };
   }, []);
 
-  async function loadBrandHistory() {
-    setBrandHistoryLoading(true);
-    setBrandHistoryError("");
-    try {
-      const data = await api.getBrandHistory({ category });
-      setBrandHistoryLabels(data.labels || []);
-      setBrandHistory(data.series || []);
-    } catch (err) {
-      setBrandHistoryError(err.message);
-      setBrandHistoryLabels([]);
-      setBrandHistory([]);
-    } finally {
-      setBrandHistoryLoading(false);
-    }
-  }
-
   useEffect(() => {
     const saved = loadPersistedState("home");
     if (saved && !comparison) {
       if (saved.category) setCategory(saved.category);
       if (saved.base_competitor) setBaseCompetitor(saved.base_competitor);
-      if (saved.comparison) {
+      const savedCurrency = saved?.comparison?.base_currency;
+      if (saved.comparison && (!savedCurrency || savedCurrency === "KES")) {
         setComparison(saved.comparison);
         setLastLoadedFilters({
           category: saved.category || category,
@@ -97,101 +86,44 @@ export default function HomePage() {
     setComparisonHydrated(true);
   }, [comparison, category]);
 
-  async function loadComparison({ persist = false } = {}) {
+  async function loadComparison() {
     setComparisonLoading(true);
     setComparisonError("");
     try {
-      if (!competitors.length) {
-        setComparison({ rows: [], failed: [] });
-        return;
-      }
-
-      const requests = competitors.map((competitor) =>
-        api.searchCompetitor(competitor.id, category, { persist })
-      );
-      const results = await Promise.allSettled(requests);
-      const rows = [];
-      const failed = [];
-
-      results.forEach((result, index) => {
-        const competitor = competitors[index];
-        if (result.status !== "fulfilled") {
-          failed.push(competitor?.name || `Competitor ${index + 1}`);
-          rows.push({
-            competitor: competitor?.name || `Competitor ${index + 1}`,
-            items_count: 0,
-            avg_price: null,
-            delta_vs_vivo: null,
-            delta_pct_vs_vivo: null,
-          });
-          return;
-        }
-
-        const items = result.value?.data || [];
-        const limitedItems = items.slice(0, 20);
-        const prices = limitedItems
-          .map((item) => Number(item.price))
-          .filter((value) => Number.isFinite(value));
-        const avg =
-          prices.length > 0
-            ? prices.reduce((sum, value) => sum + value, 0) / prices.length
-            : null;
-        rows.push({
-          competitor: competitor?.name || `Competitor ${index + 1}`,
-          items_count: limitedItems.length,
-          avg_price: avg != null ? Number(avg.toFixed(2)) : null,
-          delta_vs_vivo: null,
-          delta_pct_vs_vivo: null,
-        });
-      });
-
-      if (baseCompetitor) {
-        const baseRow = rows.find((row) => row.competitor === baseCompetitor);
-        const baseAvg = baseRow?.avg_price;
-        if (baseAvg != null) {
-          rows.forEach((row) => {
-            if (row.avg_price == null) return;
-            const delta = row.avg_price - baseAvg;
-            row.delta_vs_vivo = Number(delta.toFixed(2));
-            row.delta_pct_vs_vivo =
-              baseAvg !== 0 ? Number(((delta / baseAvg) * 100).toFixed(2)) : null;
-          });
-        }
-      }
-
-      const nextComparison = { rows, failed, base_currency: "KES" };
-      setComparison(nextComparison);
+      const result = await api.getComparison({ base_competitor: baseCompetitor, category });
+      setComparison(result || { rows: [], failed: [] });
       setLastLoadedFilters({ category, base_competitor: baseCompetitor });
       savePersistedState("home", {
         category,
         base_competitor: baseCompetitor,
-        comparison: nextComparison,
+        comparison: result,
+        price_series: priceSeries,
+        price_labels: priceLabels,
         updated_at: new Date().toISOString(),
       });
     } catch (err) {
-      setComparisonError(err.message);
+      const saved = loadPersistedState("home");
+      if (saved?.comparison) {
+        setComparison(saved.comparison);
+        setComparisonError(
+          `${err.message || "Comparison failed."} Showing last saved results from ${
+            saved.updated_at || "previous session"
+          }.`
+        );
+      } else {
+        setComparisonError(err.message);
+      }
     } finally {
       setComparisonLoading(false);
     }
   }
 
-  useEffect(() => {
-    if (!comparisonHydrated || !category) return;
-    if (
-      lastLoadedFilters &&
-      lastLoadedFilters.category === category &&
-      lastLoadedFilters.base_competitor === baseCompetitor
-    ) {
-      return;
-    }
-    loadComparison();
-  }, [category, baseCompetitor, comparisonHydrated, lastLoadedFilters]);
-
   async function runSearch() {
     setSearchLoading(true);
     setSearchMessage("");
     try {
-      await loadComparison({ persist: true });
+      await loadComparison();
+      await loadPriceSeries();
       setSearchMessage("Search completed. Chart updated.");
     } catch (err) {
       setSearchMessage(err.message || "Search failed.");
@@ -200,30 +132,85 @@ export default function HomePage() {
     }
   }
 
-  useEffect(() => {
-    loadBrandHistory();
-  }, [category]);
+  async function loadPriceSeries() {
+    setPriceSeriesLoading(true);
+    setPriceSeriesError("");
+    try {
+      const products = await api.getProducts();
+      const normalizedCategory = String(category || "").trim().toLowerCase();
+      const filtered = Array.isArray(products)
+        ? products.filter((product) => {
+            if (!normalizedCategory) return true;
+            return String(product.category || "").trim().toLowerCase() === normalizedCategory;
+          })
+        : [];
+      const grouped = new Map();
+      filtered.forEach((product) => {
+        const brand = product.competitor_name || "Unknown";
+        const price = Number(product.latest_price);
+        if (!Number.isFinite(price)) return;
+        if (!grouped.has(brand)) grouped.set(brand, []);
+        grouped.get(brand).push(price);
+      });
+      let series = Array.from(grouped.entries()).map(([brand, prices]) => ({
+        brand,
+        data: prices.sort((a, b) => a - b).slice(0, 20),
+      }));
+      if (comparison?.rows?.length) {
+        const allowed = new Set(
+          comparison.rows.map((row) => normalizeName(row.competitor))
+        );
+        series = series.filter((item) => allowed.has(normalizeName(item.brand)));
+      }
+      const maxLen = series.reduce((max, item) => Math.max(max, item.data.length), 0);
+      const labels = Array.from({ length: maxLen }, (_, idx) => `Product ${idx + 1}`);
+      setPriceLabels(labels);
+      setPriceSeries(series);
+      savePersistedState("home", {
+        category,
+        base_competitor: baseCompetitor,
+        comparison,
+        price_series: series,
+        price_labels: labels,
+        updated_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      const saved = loadPersistedState("home");
+      if (saved?.price_series && saved?.price_labels) {
+        setPriceSeries(saved.price_series);
+        setPriceLabels(saved.price_labels);
+        setPriceSeriesError(
+          `${err.message || "Failed to load price comparison data."} Showing last saved results from ${
+            saved.updated_at || "previous session"
+          }.`
+        );
+      } else {
+        setPriceSeriesError(err.message || "Failed to load price comparison data.");
+        setPriceLabels([]);
+        setPriceSeries([]);
+      }
+    } finally {
+      setPriceSeriesLoading(false);
+    }
+  }
 
   return (
     <div className="panel">
       <div className="panel-head">
         <div>
           <h2>Welcome</h2>
-          <p>Choose the workspace you want to use.</p>
+          <p>Choose What You Want to View.</p>
         </div>
       </div>
       <div className="home-grid">
         <Link to="/search" className="home-card">
           <span className="home-title">Shopify Search Console</span>
-          <span>Run the quick search routes for bodycons, bodysuits, and dresses.</span>
+          <span>Run the quick search routes for Comparison of Products.</span>
         </Link>
-        <Link to="/collections" className="home-card">
-          <span className="home-title">Collection Scrapers</span>
-          <span>Pull full product lists from collection endpoints.</span>
-        </Link>
+        
         <Link to="/competitors" className="home-card">
           <span className="home-title">Competitor Tracker</span>
-          <span>Manage competitors, products, scraping, and analytics.</span>
+          <span>Competitor List.</span>
         </Link>
       </div>
 
@@ -289,14 +276,17 @@ export default function HomePage() {
               </option>
             ))}
           </select>
-          <button
-            className="btn btn-primary"
-            type="button"
-            onClick={() => loadComparison({ persist: true })}
-            disabled={comparisonLoading}
-          >
-            {comparisonLoading ? "Loading..." : "Refresh"}
-          </button>
+            <button
+              className="btn btn-primary"
+              type="button"
+              onClick={() => {
+                loadComparison();
+                loadPriceSeries();
+              }}
+              disabled={comparisonLoading}
+            >
+              {comparisonLoading ? "Loading..." : "Refresh"}
+            </button>
         </div>
 
         {comparisonError && <div className="alert alert-warning mt-3">{comparisonError}</div>}
@@ -345,29 +335,21 @@ export default function HomePage() {
       <div className="card-block mt-4">
         <div className="panel-head">
           <div>
-            <h3>Brand Price History</h3>
-            <p>Average price trend per brand for the selected category.</p>
+            <h3>Price Comparison by Brand</h3>
+            <p>First 20 products per brand sorted by price.</p>
           </div>
         </div>
-        <div className="grid-row">
-          <button
-            className="btn btn-outline-primary"
-            type="button"
-            onClick={loadBrandHistory}
-            disabled={brandHistoryLoading}
-          >
-            {brandHistoryLoading ? "Loading..." : "Refresh History"}
-          </button>
-        </div>
-
-        {brandHistoryError && <div className="alert alert-warning mt-3">{brandHistoryError}</div>}
-
         <div className="mt-3">
-          <BrandHistoryChart
-            labels={brandHistoryLabels}
-            series={brandHistory}
-            currency={chartCurrency}
-          />
+          {priceSeriesError && <div className="alert alert-warning mt-3">{priceSeriesError}</div>}
+          {priceSeriesLoading ? (
+            <div className="text-muted">Loading price comparison...</div>
+          ) : (
+            <BrandHistoryChart
+              labels={priceLabels}
+              series={priceSeries}
+              currency={chartCurrency}
+            />
+          )}
         </div>
       </div>
     </div>
