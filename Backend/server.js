@@ -135,8 +135,15 @@ function getCompetitorWebsites(competitor) {
 function isVivoBrandItem(item) {
   const title = String(item?.title || item?.product_name || "").toLowerCase();
   if (title.includes("vivo")) return true;
-  if (title.includes("safari")) return true;
   if (title.includes("zoya")) return true;
+  if (title.includes("safari")) {
+    try {
+      const host = new URL(item?.url || item?.product_url || "").host.replace(/^www\./, "");
+      if (host === "shopzetu.com" || host === "pay.shopzetu.com") return true;
+    } catch {
+      // ignore invalid URLs
+    }
+  }
   return false;
 }
 

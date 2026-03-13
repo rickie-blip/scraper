@@ -824,9 +824,9 @@ export default function SearchPage() {
               <div className="table-actions">
                 <div>
                   <strong>{selectedCompetitor?.name || "Competitor"} results</strong>
-                  <div className="muted">{searchResult.data?.length || 0} items found</div>
+                  <div className="muted">{filteredItems.length} items found</div>
                 </div>
-                {searchResult.data?.length > 10 && searchCompetitorId && (
+                {filteredItems.length > 10 && searchCompetitorId && (
                   <Link
                     className="btn btn-outline-primary btn-sm"
                     to={`/search/competitor/${searchCompetitorId}?q=${encodeURIComponent(searchQuery)}`}
@@ -836,7 +836,7 @@ export default function SearchPage() {
                 )}
               </div>
               <div className="product-grid">
-                {searchResult.data?.slice(0, 10).map((item, idx) => {
+                {filteredItems.slice(0, 10).map((item, idx) => {
                   const imageUrl = resolveImage(item);
                   const displayCurrency = resolveCurrency(item, competitorByName, defaultCurrency);
                   const displayTitle = resolveTitle(item);
@@ -864,7 +864,7 @@ export default function SearchPage() {
                     </div>
                   );
                 })}
-                {!searchResult.data?.length && (
+                {!filteredItems.length && (
                   <div className="text-muted">No results returned.</div>
                 )}
               </div>

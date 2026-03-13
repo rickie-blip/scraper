@@ -4,6 +4,34 @@
       "dresses": ["womens-dresses"],
       "dress": ["womens-dresses"]
     },
+    "shopzetu.com": {
+      "dresses": ["dresses", "dress"],
+      "dress": ["dresses", "dress"],
+      "bodycons": ["bodycon", "bodycons", "body-con", "bodycons-dresses"],
+      "bodysuits": ["bodysuits", "body-suits", "body-suit"],
+      "tops": ["tops", "top"],
+      "skirts": ["skirts", "skirt"],
+      "bottoms": ["bottoms", "bottom"],
+      "pants": ["pants", "pant", "trousers", "trouser"],
+      "jumpsuits": ["jumpsuits", "playsuits", "jumpsuit", "playsuit"],
+      "lingerie": ["lingerie", "intimates", "innerwear"],
+      "loungewear": ["loungewear", "sleepwear", "lounge"],
+      "activewear": ["activewear", "athleisure", "sportswear"]
+    },
+    "pay.shopzetu.com": {
+      "dresses": ["dresses", "dress"],
+      "dress": ["dresses", "dress"],
+      "bodycons": ["bodycon", "bodycons", "body-con", "bodycons-dresses"],
+      "bodysuits": ["bodysuits", "body-suits", "body-suit"],
+      "tops": ["tops", "top"],
+      "skirts": ["skirts", "skirt"],
+      "bottoms": ["bottoms", "bottom"],
+      "pants": ["pants", "pant", "trousers", "trouser"],
+      "jumpsuits": ["jumpsuits", "playsuits", "jumpsuit", "playsuit"],
+      "lingerie": ["lingerie", "intimates", "innerwear"],
+      "loungewear": ["loungewear", "sleepwear", "lounge"],
+      "activewear": ["activewear", "athleisure", "sportswear"]
+    },
     "neviive.com": {
       "dresses": ["dresses"],
       "dress": ["dresses"]
@@ -13,6 +41,20 @@
     "Leorana": {
       "dresses": ["womens-dresses"],
       "dress": ["womens-dresses"]
+    },
+    "Vivo": {
+      "dresses": ["dresses", "dress"],
+      "dress": ["dresses", "dress"],
+      "bodycons": ["bodycon", "bodycons", "body-con", "bodycons-dresses"],
+      "bodysuits": ["bodysuits", "body-suits", "body-suit"],
+      "tops": ["tops", "top"],
+      "skirts": ["skirts", "skirt"],
+      "bottoms": ["bottoms", "bottom"],
+      "pants": ["pants", "pant", "trousers", "trouser"],
+      "jumpsuits": ["jumpsuits", "playsuits", "jumpsuit", "playsuit"],
+      "lingerie": ["lingerie", "intimates", "innerwear"],
+      "loungewear": ["loungewear", "sleepwear", "lounge"],
+      "activewear": ["activewear", "athleisure", "sportswear"]
     },
     "Neviive": {
       "dresses": ["dresses"],
