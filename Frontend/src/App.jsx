@@ -2,6 +2,7 @@ import { NavLink, Route, Routes } from "react-router-dom";
 // import CollectionsPage from "./pages/CollectionsPage";
 import CompetitorsPage from "./pages/CompetitorsPage";
 import HomePage from "./pages/HomePage";
+import LandingPage from "./pages/LandingPage";
 import SearchPage from "./pages/SearchPage";
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
           <NavLink to="/" end>
             Home
           </NavLink>
+          <NavLink to="/dashboard">Dashboard</NavLink>
           <NavLink to="/search">Search</NavLink>
           {/*
           <NavLink to="/collections">Collections</NavLink>
@@ -28,7 +30,8 @@ export default function App() {
       </header>
 
       <Routes>
-        <Route path="/" element={<HomePage />} />
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/dashboard" element={<HomePage />} />
         <Route path="/search" element={<SearchPage />} />
         <Route path="/search/competitor/:id" element={<SearchPage />} />
         {/*
