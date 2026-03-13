@@ -28,6 +28,7 @@ export const api = {
   searchCompetitor: (id, query, options = {}) => {
     const params = new URLSearchParams();
     if (query) params.set("q", query);
+    if (options.category) params.set("category", options.category);
     if (options.persist) params.set("persist", "1");
     if (options.refresh) params.set("refresh", "1");
     if (options.page) params.set("page", String(options.page));

@@ -311,6 +311,7 @@ export default function SearchPage() {
     setSearchResult(null);
     setPage(nextPage);
     const effectiveRefresh = persist ? true : refresh;
+    const activeCategory = subcategory || category || "";
     try {
       if (searchCompetitorId === "all") {
         if (!competitors.length) {
@@ -328,6 +329,7 @@ export default function SearchPage() {
         for (const competitor of competitors) {
           try {
             let payload = await api.searchCompetitor(competitor.id, searchQuery, {
+              category: activeCategory,
               persist,
               refresh: effectiveRefresh,
               page: 1,
@@ -337,6 +339,7 @@ export default function SearchPage() {
             if (!items.length && !effectiveRefresh) {
               try {
                 payload = await api.searchCompetitor(competitor.id, searchQuery, {
+                  category: activeCategory,
                   persist,
                   refresh: true,
                   page: 1,
@@ -414,6 +417,7 @@ export default function SearchPage() {
         });
       } else {
         const res = await api.searchCompetitor(searchCompetitorId, searchQuery, {
+          category: activeCategory,
           persist,
           refresh: effectiveRefresh,
           page: nextPage,
@@ -423,6 +427,7 @@ export default function SearchPage() {
           if (!effectiveRefresh) {
             try {
               const refreshed = await api.searchCompetitor(searchCompetitorId, searchQuery, {
+                category: activeCategory,
                 persist,
                 refresh: true,
                 page: nextPage,

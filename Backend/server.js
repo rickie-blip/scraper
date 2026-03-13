@@ -41,7 +41,12 @@ const BRAND_CURRENCY = {
 const HOST_CURRENCY_OVERRIDES = {
 };
 const DEFAULT_COMPETITORS = [
-  { name: "Vivo", website: "https://pay.shopzetu.com", currency: BRAND_CURRENCY.Vivo },
+  {
+    name: "Vivo",
+    website: "https://pay.shopzetu.com",
+    currency: BRAND_CURRENCY.Vivo,
+    website_aliases: ["https://pay.shopzetu.com/", "https://www.shopzetu.com/"],
+  },
   { name: "Nalani", website: "https://nalaniwomen.com", currency: BRAND_CURRENCY.Nalani },
   { name: "Neviive", website: "https://neviive.com", currency: BRAND_CURRENCY.Neviive },
   { name: "Diracfashion", website: "https://diracfashion.com", currency: BRAND_CURRENCY.Diracfashion },
@@ -1283,6 +1288,18 @@ function buildStoredSearchResults(store, competitorId, query, fallbackCurrency) 
   }));
 }
 
+function matchesQueryItem(item, query) {
+  const normalizedQuery = String(query || "").toLowerCase().trim();
+  if (!normalizedQuery) return true;
+  const title = String(item?.title || item?.product_name || "").toLowerCase();
+  const url = String(item?.url || item?.product_url || "").toLowerCase();
+  const slug = slugifyCollectionQuery(normalizedQuery);
+  if (slug && url.includes(slug)) return true;
+  const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
+  if (!tokens.length) return true;
+  return tokens.every((token) => title.includes(token));
+}
+
 function buildOverrideCandidates(website, competitorName, query, overrides) {
   const origin = new URL(website).origin;
   const host = new URL(website).host.replace(/^www\./, "");
@@ -1444,6 +1461,7 @@ async function scrapeShopifyCollection(url, currency) {
 }
 
 function matchesAnyQueryVariant(product, variants) {
+  if (!Array.isArray(variants) || variants.length === 0) return true;
   const title = String(product?.title || "").toLowerCase();
   const handle = String(product?.handle || "").toLowerCase();
   const vendor = String(product?.vendor || "").toLowerCase();
@@ -1751,10 +1769,9 @@ app.delete("/api/competitors/:id", async (req, res) => {
 
 app.get("/api/competitors/:id/search", async (req, res) => {
   try {
-    const query = req.query.q || req.query.query;
-    if (!query) {
-      return res.status(400).json({ error: "Query is required." });
-    }
+    const queryValue = String(req.query.q || req.query.query || "").trim();
+    const categoryParam = String(req.query.category || "").trim();
+    const effectiveQuery = categoryParam || queryValue;
 
     const store = await readStore();
     const competitor = store.competitors.find(
@@ -1773,7 +1790,7 @@ app.get("/api/competitors/:id/search", async (req, res) => {
       1,
       Math.min(SEARCH_PAGE_SIZE_MAX, Number(req.query.page_size) || SEARCH_PAGE_SIZE_DEFAULT)
     );
-    const cacheKey = `${competitor.id}:${String(query).toLowerCase()}`;
+    const cacheKey = `${competitor.id}:${String(effectiveQuery).toLowerCase()}`;
     const cached = searchCache.get(cacheKey);
 
     function buildPagedResponse(payload) {
@@ -1830,14 +1847,18 @@ app.get("/api/competitors/:id/search", async (req, res) => {
 
     const overrides = await loadCollectionOverrides();
     const websites = getCompetitorWebsites(competitor);
-    const queryVariants = buildQueryVariants(query, overrides, competitor.name);
+    const queryVariants = effectiveQuery
+      ? buildQueryVariants(effectiveQuery, overrides, competitor.name)
+      : [];
     let scrapeError = null;
 
     try {
       for (const website of websites) {
-        const overrideCandidates = expandCollectionCandidates(
-          buildOverrideCandidates(website, competitor.name, query, overrides)
-        );
+        const overrideCandidates = effectiveQuery
+          ? expandCollectionCandidates(
+              buildOverrideCandidates(website, competitor.name, effectiveQuery, overrides)
+            )
+          : [];
         for (const candidate of overrideCandidates) {
           try {
             const found = await scrapeShopifyCollection(candidate, competitor.currency);
@@ -1856,9 +1877,9 @@ app.get("/api/competitors/:id/search", async (req, res) => {
           }
         }
 
-        const collectionCandidates = expandCollectionCandidates(
-          buildCollectionCandidates(website, query)
-        );
+        const collectionCandidates = effectiveQuery
+          ? expandCollectionCandidates(buildCollectionCandidates(website, effectiveQuery))
+          : [];
         for (const candidate of collectionCandidates) {
           try {
             const found = await scrapeShopifyCollection(candidate, competitor.currency);
@@ -1877,7 +1898,9 @@ app.get("/api/competitors/:id/search", async (req, res) => {
           }
         }
 
-        const discoveredCollections = await findShopifyCollections(website, query);
+        const discoveredCollections = effectiveQuery
+          ? await findShopifyCollections(website, effectiveQuery)
+          : [];
         const discoveredCandidates = expandCollectionCandidates(discoveredCollections);
         for (const candidate of discoveredCandidates) {
           try {
@@ -1921,7 +1944,7 @@ app.get("/api/competitors/:id/search", async (req, res) => {
       const stored = buildStoredSearchResults(
         store,
         competitor.id,
-        query,
+        effectiveQuery,
         competitor.currency
       );
       addProducts(stored);
@@ -1963,8 +1986,9 @@ app.get("/api/competitors/:id/search", async (req, res) => {
         };
       })
       .filter((item) => isProductUrl(item.url || item.product_url));
+    const filteredData = data.filter((item) => matchesQueryItem(item, effectiveQuery));
 
-    const missingImages = data.filter((item) => !item.image && item.url);
+    const missingImages = filteredData.filter((item) => !item.image && item.url);
     if (missingImages.length) {
       const limit = missingImages.slice(0, 25);
       await Promise.all(
@@ -1984,7 +2008,7 @@ app.get("/api/competitors/:id/search", async (req, res) => {
     if (shouldPersist) {
       const collectedAt = new Date().toISOString();
       const collectedDay = collectedAt.slice(0, 10);
-      for (const item of data) {
+      for (const item of filteredData) {
         const productUrl = item.url || item.product_url || "";
         if (!productUrl || !isProductUrl(productUrl)) continue;
         let product = store.products.find(
@@ -2060,15 +2084,15 @@ app.get("/api/competitors/:id/search", async (req, res) => {
     store.dashboard.search = {
       competitor_id: competitor.id,
       competitor_name: competitor.name,
-      query,
-      result: { success: true, count: data.length, data, failed: [] },
+      query: effectiveQuery,
+      result: { success: true, count: filteredData.length, data: filteredData, failed: [] },
       updated_at: new Date().toISOString(),
     };
 
     const responsePayload = {
       success: true,
-      count: data.length,
-      data,
+      count: filteredData.length,
+      data: filteredData,
       competitor: { id: competitor.id, name: competitor.name },
       persisted,
     };
@@ -2079,7 +2103,7 @@ app.get("/api/competitors/:id/search", async (req, res) => {
     store.dashboard.search_cache = store.dashboard.search_cache || {};
     store.dashboard.search_cache[cacheKey] = {
       at: cacheEntry.at,
-      data,
+      data: filteredData,
       persisted,
     };
     await writeStore(store);
