@@ -59,6 +59,219 @@ function getDbPool() {
   return dbPool;
 }
 
+async function ensureDbSchema(pool) {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS competitors (
+      id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      website TEXT NOT NULL,
+      currency TEXT,
+      website_aliases JSONB,
+      search_presets JSONB,
+      created_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS products (
+      id INTEGER PRIMARY KEY,
+      competitor_id INTEGER REFERENCES competitors(id) ON DELETE CASCADE,
+      competitor_name TEXT,
+      product_name TEXT,
+      category TEXT,
+      product_url TEXT,
+      image TEXT,
+      currency TEXT,
+      latest_price NUMERIC,
+      latest_collected_at TIMESTAMPTZ
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS history (
+      id INTEGER PRIMARY KEY,
+      product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
+      price NUMERIC,
+      collected_at TIMESTAMPTZ
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS dashboard_state (
+      key TEXT PRIMARY KEY,
+      value JSONB NOT NULL,
+      updated_at TIMESTAMPTZ
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS counters (
+      key TEXT PRIMARY KEY,
+      value INTEGER NOT NULL
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS app_state (
+      key TEXT PRIMARY KEY,
+      value JSONB NOT NULL
+    );
+  `);
+}
+
+async function hasAnyRows(pool, table) {
+  const res = await pool.query(`SELECT 1 FROM ${table} LIMIT 1`);
+  return res.rows.length > 0;
+}
+
+async function loadStoreFromDb(pool) {
+  const [competitorsRes, productsRes, historyRes, dashboardRes, countersRes] = await Promise.all(
+    [
+      pool.query("SELECT * FROM competitors ORDER BY id ASC"),
+      pool.query("SELECT * FROM products ORDER BY id ASC"),
+      pool.query("SELECT * FROM history ORDER BY id ASC"),
+      pool.query("SELECT * FROM dashboard_state"),
+      pool.query("SELECT * FROM counters"),
+    ]
+  );
+
+  const dashboard = {};
+  for (const row of dashboardRes.rows) {
+    dashboard[row.key] = row.value;
+  }
+
+  const counters = { competitor: 1, product: 1, history: 1 };
+  for (const row of countersRes.rows) {
+    counters[row.key] = row.value;
+  }
+
+  return {
+    competitors: competitorsRes.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      website: row.website,
+      currency: row.currency,
+      website_aliases: row.website_aliases,
+      search_presets: row.search_presets,
+      created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
+      updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+    })),
+    products: productsRes.rows.map((row) => ({
+      id: row.id,
+      competitor_id: row.competitor_id,
+      competitor_name: row.competitor_name,
+      product_name: row.product_name,
+      category: row.category,
+      product_url: row.product_url,
+      image: row.image,
+      currency: row.currency,
+      latest_price: row.latest_price != null ? Number(row.latest_price) : null,
+      latest_collected_at: row.latest_collected_at
+        ? new Date(row.latest_collected_at).toISOString()
+        : null,
+    })),
+    history: historyRes.rows.map((row) => ({
+      id: row.id,
+      product_id: row.product_id,
+      price: row.price != null ? Number(row.price) : null,
+      collected_at: row.collected_at ? new Date(row.collected_at).toISOString() : null,
+    })),
+    counters,
+    dashboard,
+    seeded: true,
+  };
+}
+
+async function saveStoreToDb(pool, store) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("DELETE FROM history");
+    await client.query("DELETE FROM products");
+    await client.query("DELETE FROM competitors");
+    await client.query("DELETE FROM dashboard_state");
+    await client.query("DELETE FROM counters");
+
+    for (const competitor of store.competitors || []) {
+      await client.query(
+        `INSERT INTO competitors
+          (id, name, website, currency, website_aliases, search_presets, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          competitor.id,
+          competitor.name,
+          competitor.website,
+          competitor.currency,
+          competitor.website_aliases || null,
+          competitor.search_presets || null,
+          competitor.created_at ? new Date(competitor.created_at) : null,
+          competitor.updated_at ? new Date(competitor.updated_at) : null,
+        ]
+      );
+    }
+
+    for (const product of store.products || []) {
+      await client.query(
+        `INSERT INTO products
+          (id, competitor_id, competitor_name, product_name, category, product_url, image, currency, latest_price, latest_collected_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [
+          product.id,
+          product.competitor_id,
+          product.competitor_name,
+          product.product_name,
+          product.category,
+          product.product_url,
+          product.image,
+          product.currency,
+          product.latest_price,
+          product.latest_collected_at ? new Date(product.latest_collected_at) : null,
+        ]
+      );
+    }
+
+    for (const entry of store.history || []) {
+      await client.query(
+        `INSERT INTO history (id, product_id, price, collected_at)
+         VALUES ($1,$2,$3,$4)`,
+        [
+          entry.id,
+          entry.product_id,
+          entry.price,
+          entry.collected_at ? new Date(entry.collected_at) : null,
+        ]
+      );
+    }
+
+    for (const [key, value] of Object.entries(store.dashboard || {})) {
+      await client.query(
+        `INSERT INTO dashboard_state (key, value, updated_at)
+         VALUES ($1,$2,$3)`,
+        [key, value, value?.updated_at ? new Date(value.updated_at) : null]
+      );
+    }
+
+    const counters = store.counters || {};
+    for (const [key, value] of Object.entries(counters)) {
+      await client.query(`INSERT INTO counters (key, value) VALUES ($1,$2)`, [key, value]);
+    }
+
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function migrateAppStateToDbIfNeeded(pool) {
+  const appState = await pool.query("SELECT value FROM app_state WHERE key = $1", [
+    "store",
+  ]);
+  const store = appState.rows?.[0]?.value;
+  if (!store || typeof store !== "object") return false;
+  await saveStoreToDb(pool, store);
+  await pool.query("DELETE FROM app_state WHERE key = $1", ["store"]);
+  return true;
+}
+
 function buildInitialStore(sourceCompetitors) {
   const seededCompetitors = sourceCompetitors.map((c, idx) => ({
     id: idx + 1,
@@ -184,20 +397,16 @@ function pruneStore(store, daysToKeep = 7) {
 async function ensureStore() {
   if (USE_DB) {
     const pool = getDbPool();
-    await pool.query(
-      "CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value JSONB NOT NULL)"
-    );
-    const existing = await pool.query("SELECT value FROM app_state WHERE key = $1", [
-      "store",
-    ]);
-    if (!existing.rows.length) {
-      const envCompetitors = loadCompetitorsFromEnv();
-      const sourceCompetitors = envCompetitors || DEFAULT_COMPETITORS;
-      const initial = buildInitialStore(sourceCompetitors);
-      await pool.query("INSERT INTO app_state (key, value) VALUES ($1, $2)", [
-        "store",
-        initial,
-      ]);
+    await ensureDbSchema(pool);
+    const hasData = await hasAnyRows(pool, "competitors");
+    if (!hasData) {
+      const migrated = await migrateAppStateToDbIfNeeded(pool);
+      if (!migrated) {
+        const envCompetitors = loadCompetitorsFromEnv();
+        const sourceCompetitors = envCompetitors || DEFAULT_COMPETITORS;
+        const initial = buildInitialStore(sourceCompetitors);
+        await saveStoreToDb(pool, initial);
+      }
     }
     return;
   }
@@ -218,9 +427,8 @@ async function readStore() {
   let store;
   if (USE_DB) {
     const pool = getDbPool();
-    const result = await pool.query("SELECT value FROM app_state WHERE key = $1", ["store"]);
-    store = result.rows?.[0]?.value || null;
-    if (!store || typeof store !== "object") {
+    store = await loadStoreFromDb(pool);
+    if (!store || !Array.isArray(store.competitors)) {
       const envCompetitors = loadCompetitorsFromEnv();
       const sourceCompetitors = envCompetitors || DEFAULT_COMPETITORS;
       store = buildInitialStore(sourceCompetitors);
@@ -287,10 +495,7 @@ async function loadCollectionOverrides() {
 async function writeStore(store) {
   if (USE_DB) {
     const pool = getDbPool();
-    await pool.query(
-      "INSERT INTO app_state (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-      ["store", store]
-    );
+    await saveStoreToDb(pool, store);
     return;
   }
 
