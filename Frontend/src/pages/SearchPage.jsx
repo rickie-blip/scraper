@@ -334,6 +334,9 @@ export default function SearchPage() {
             const items = payload?.data || [];
             combined.data.push(...items);
             combined.count += items.length;
+            if (!items.length && payload?.failed?.length) {
+              combined.failed.push(competitor?.name || "Competitor");
+            }
           } catch {
             combined.failed.push(competitor?.name || "Competitor");
           }

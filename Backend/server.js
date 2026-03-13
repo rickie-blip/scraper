@@ -119,8 +119,17 @@ function getCompetitorWebsites(competitor) {
   if (competitor?.website) websites.add(String(competitor.website));
   if (String(competitor?.name || "").toLowerCase() === "vivo") {
     websites.add("https://pay.shopzetu.com");
+    websites.add("https://shopzetu.com");
+    websites.add("https://www.shopzetu.com");
   }
-  return Array.from(websites);
+  return Array.from(websites).filter((website) => {
+    try {
+      new URL(website);
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }
 
 function isVivoBrandItem(item) {
@@ -1247,7 +1256,28 @@ app.get("/api/dashboard/state", async (req, res) => {
     const store = await readStore();
     res.status(200).json(store.dashboard || {});
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    try {
+      const store = await readStore();
+      const competitor = store.competitors.find(
+        (c) => String(c.id) === String(req.params.id)
+      );
+      const fallback = buildStoredSearchResults(
+        store,
+        competitor?.id,
+        req.query.q || req.query.query,
+        competitor?.currency || null
+      );
+      const hasData = fallback.length > 0;
+      return res.status(200).json({
+        success: hasData,
+        count: fallback.length,
+        data: fallback,
+        failed: hasData ? [] : competitor ? [competitor.name] : [],
+        error: error.message,
+      });
+    } catch {
+      res.status(500).json({ error: error.message });
+    }
   }
 });
 
