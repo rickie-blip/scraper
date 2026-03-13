@@ -235,9 +235,6 @@ export default function HomePage() {
           <Link to="/search" className="btn btn-outline-primary">
             Search Category
           </Link>
-          <Link to="/competitors" className="btn btn-outline-primary">
-            Add Competitor
-          </Link>
         </div>
         {searchMessage && <div className="alert alert-info mt-3">{searchMessage}</div>}
       </div>

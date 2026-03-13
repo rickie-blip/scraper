@@ -35,6 +35,8 @@ const BRAND_CURRENCY = {
   Nalani: "KES",
   Neviive: "KES",
   Diracfashion: "USD",
+  Leorana: "KES",
+  ikojn: "KES",
 };
 const HOST_CURRENCY_OVERRIDES = {
 };
@@ -43,6 +45,8 @@ const DEFAULT_COMPETITORS = [
   { name: "Nalani", website: "https://nalaniwomen.com", currency: BRAND_CURRENCY.Nalani },
   { name: "Neviive", website: "https://neviive.com", currency: BRAND_CURRENCY.Neviive },
   { name: "Diracfashion", website: "https://diracfashion.com", currency: BRAND_CURRENCY.Diracfashion },
+  { name: "Leorana", website: "https://leorana.com/", currency: BRAND_CURRENCY.Leorana },
+  { name: "ikojn", website: "https://www.ikojn.com/", currency: BRAND_CURRENCY.ikojn },
 ];
 
 const USE_DB = Boolean(DATABASE_URL);
@@ -131,6 +135,19 @@ async function loadStoreFromDb(pool) {
     ]
   );
 
+  const latestHistoryByProduct = new Map();
+  for (const row of historyRes.rows) {
+    const ts = row.collected_at ? Date.parse(row.collected_at) : NaN;
+    const current = latestHistoryByProduct.get(row.product_id);
+    if (!current || (Number.isFinite(ts) && ts > current.ts)) {
+      latestHistoryByProduct.set(row.product_id, {
+        price: row.price != null ? Number(row.price) : null,
+        collected_at: row.collected_at ? new Date(row.collected_at).toISOString() : null,
+        ts: Number.isFinite(ts) ? ts : -1,
+      });
+    }
+  }
+
   const dashboard = {};
   for (const row of dashboardRes.rows) {
     dashboard[row.key] = row.value;
@@ -152,20 +169,31 @@ async function loadStoreFromDb(pool) {
       created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
       updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : null,
     })),
-    products: productsRes.rows.map((row) => ({
-      id: row.id,
-      competitor_id: row.competitor_id,
-      competitor_name: row.competitor_name,
-      product_name: row.product_name,
-      category: row.category,
-      product_url: row.product_url,
-      image: row.image,
-      currency: row.currency,
-      latest_price: row.latest_price != null ? Number(row.latest_price) : null,
-      latest_collected_at: row.latest_collected_at
-        ? new Date(row.latest_collected_at).toISOString()
-        : null,
-    })),
+    products: productsRes.rows.map((row) => {
+      const fallback = latestHistoryByProduct.get(row.id);
+      const latestPrice =
+        row.latest_price != null
+          ? Number(row.latest_price)
+          : fallback?.price != null
+          ? Number(fallback.price)
+          : null;
+      const latestCollectedAt =
+        row.latest_collected_at
+          ? new Date(row.latest_collected_at).toISOString()
+          : fallback?.collected_at || null;
+      return {
+        id: row.id,
+        competitor_id: row.competitor_id,
+        competitor_name: row.competitor_name,
+        product_name: row.product_name,
+        category: row.category,
+        product_url: row.product_url,
+        image: row.image,
+        currency: row.currency,
+        latest_price: latestPrice,
+        latest_collected_at: latestCollectedAt,
+      };
+    }),
     history: historyRes.rows.map((row) => ({
       id: row.id,
       product_id: row.product_id,
@@ -508,6 +536,14 @@ function normalizeMoney(raw) {
   if (num == null) return null;
   if (Number.isInteger(num) && num >= 1000) return Number((num / 100).toFixed(2));
   return Number(num.toFixed(2));
+}
+
+function sanitizeKesPrice(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return null;
+  if (amount > 100000 && amount < 10000000) return Number((amount / 100).toFixed(2));
+  if (amount >= 10000000) return null;
+  return amount;
 }
 
 async function fetchJson(url, options = {}) {
@@ -1003,6 +1039,7 @@ async function buildComparison(store, baseCompetitor, category) {
       competitor_name: product.competitor_name,
       price: product.latest_price,
       currency: sourceCurrency,
+      collected_at: product.latest_collected_at || null,
     });
   }
 
@@ -1016,25 +1053,61 @@ async function buildComparison(store, baseCompetitor, category) {
       entry.currency,
       fxRates
     );
-    const normalizedPrice = converted.price ?? entry.price;
+    const rawPrice = converted.price ?? entry.price;
+    const normalizedPrice =
+      converted.currency === KES_BASE_CURRENCY
+        ? sanitizeKesPrice(rawPrice)
+        : rawPrice;
+    if (normalizedPrice == null) continue;
     const key = entry.competitor_name;
     if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key).push(normalizedPrice);
+    grouped.get(key).push({
+      price: normalizedPrice,
+      collected_at: entry.collected_at,
+    });
   }
 
   let baseAvg = null;
   if (baseCompetitor && grouped.has(baseCompetitor)) {
-    const prices = grouped.get(baseCompetitor);
-    baseAvg = prices.reduce((a, b) => a + b, 0) / prices.length;
+    const entries = grouped.get(baseCompetitor);
+    const slice = entries
+      .slice()
+      .sort((a, b) => {
+        const aTime = Date.parse(a.collected_at || "");
+        const bTime = Date.parse(b.collected_at || "");
+        const aValid = Number.isFinite(aTime);
+        const bValid = Number.isFinite(bTime);
+        if (aValid && bValid) return bTime - aTime;
+        if (aValid) return -1;
+        if (bValid) return 1;
+        return 0;
+      })
+      .slice(0, 20);
+    baseAvg =
+      slice.reduce((sum, item) => sum + item.price, 0) / slice.length;
   }
 
-  for (const [competitor, prices] of grouped.entries()) {
-    const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
+  for (const [competitor, entries] of grouped.entries()) {
+    const slice = entries
+      .slice()
+      .sort((a, b) => {
+        const aTime = Date.parse(a.collected_at || "");
+        const bTime = Date.parse(b.collected_at || "");
+        const aValid = Number.isFinite(aTime);
+        const bValid = Number.isFinite(bTime);
+        if (aValid && bValid) return bTime - aTime;
+        if (aValid) return -1;
+        if (bValid) return 1;
+        return 0;
+      })
+      .slice(0, 20);
+    const avg =
+      slice.reduce((sum, item) => sum + item.price, 0) / slice.length;
     const delta = baseAvg != null ? avg - baseAvg : null;
     const deltaPct = baseAvg ? (delta / baseAvg) * 100 : null;
     rows.push({
       competitor,
-      items_count: prices.length,
+      items_count: slice.length,
       avg_price: Number(avg.toFixed(2)),
       delta_vs_vivo: delta != null ? Number(delta.toFixed(2)) : null,
       delta_pct_vs_vivo: deltaPct != null ? Number(deltaPct.toFixed(2)) : null,
@@ -2161,13 +2234,17 @@ app.get("/api/products", async (req, res) => {
         sourceCurrency,
         fxRates
       );
+      const safeLatestPrice =
+        converted.currency === KES_BASE_CURRENCY
+          ? sanitizeKesPrice(converted.price)
+          : converted.price;
       return {
         ...product,
         competitor_currency: competitor?.currency || null,
         original_currency: converted.original_currency,
         original_latest_price: converted.original_price,
         currency: converted.currency || sourceCurrency,
-        latest_price: converted.price,
+        latest_price: safeLatestPrice,
       };
     });
     res.status(200).json(products);
