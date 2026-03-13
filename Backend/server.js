@@ -1543,7 +1543,7 @@ app.get("/api/competitors/:id/search", async (req, res) => {
     const products = [];
     const seenUrls = new Set();
     const isVivo = String(competitor.name || "").toLowerCase() === "vivo";
-    const maxResults = 200;
+    const maxResults = 30;
 
     function addProducts(items) {
       if (!Array.isArray(items) || !items.length) return;

@@ -141,7 +141,7 @@ export default function SearchMorePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [page, setPage] = useState(1);
-  const [pageSize] = useState(100);
+  const [pageSize] = useState(30);
 
   const totalPages = useMemo(() => {
     const total = results?.total ?? results?.data?.length ?? 0;

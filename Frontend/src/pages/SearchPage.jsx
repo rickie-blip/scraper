@@ -184,7 +184,7 @@ export default function SearchPage() {
   const [searchResult, setSearchResult] = useState(null);
   const [searchError, setSearchError] = useState("");
   const [page, setPage] = useState(1);
-  const [pageSize] = useState(100);
+  const [pageSize] = useState(30);
   const [detailView, setDetailView] = useState(false);
   const categoryRef = useRef(null);
 
@@ -310,6 +310,7 @@ export default function SearchPage() {
     setSearchError("");
     setSearchResult(null);
     setPage(nextPage);
+    const effectiveRefresh = persist ? true : refresh;
     try {
       if (searchCompetitorId === "all") {
         if (!competitors.length) {
@@ -322,19 +323,56 @@ export default function SearchPage() {
           data: [],
           failed: [],
         };
+        let storedProducts = null;
 
         for (const competitor of competitors) {
           try {
-            const payload = await api.searchCompetitor(competitor.id, searchQuery, {
+            let payload = await api.searchCompetitor(competitor.id, searchQuery, {
               persist,
-              refresh,
+              refresh: effectiveRefresh,
               page: 1,
               page_size: pageSize,
             });
-            const items = payload?.data || [];
+            let items = payload?.data || [];
+            if (!items.length && !effectiveRefresh) {
+              try {
+                payload = await api.searchCompetitor(competitor.id, searchQuery, {
+                  persist,
+                  refresh: true,
+                  page: 1,
+                  page_size: pageSize,
+                });
+                items = payload?.data || [];
+              } catch {
+                // ignore refresh errors
+              }
+            }
+            if (!items.length) {
+              try {
+                if (!storedProducts) {
+                  storedProducts = await api.getProducts();
+                }
+                const fallback = filterStoredProducts(storedProducts, {
+                  query: searchQuery,
+                  competitorName: competitor?.name,
+                });
+                if (fallback.length) {
+                  items = fallback.map((item) => ({
+                    title: item.product_name,
+                    price: item.latest_price ?? item.price ?? null,
+                    image: item.image || null,
+                    url: item.product_url,
+                    currency: item.currency || null,
+                    brand: item.competitor_name,
+                  }));
+                }
+              } catch {
+                // ignore fallback errors
+              }
+            }
             combined.data.push(...items);
             combined.count += items.length;
-            if (!items.length && payload?.failed?.length) {
+            if (!items.length) {
               combined.failed.push(competitor?.name || "Competitor");
             }
           } catch {
@@ -377,11 +415,33 @@ export default function SearchPage() {
       } else {
         const res = await api.searchCompetitor(searchCompetitorId, searchQuery, {
           persist,
-          refresh,
+          refresh: effectiveRefresh,
           page: nextPage,
           page_size: pageSize,
         });
         if (!res?.data?.length) {
+          if (!effectiveRefresh) {
+            try {
+              const refreshed = await api.searchCompetitor(searchCompetitorId, searchQuery, {
+                persist,
+                refresh: true,
+                page: nextPage,
+                page_size: pageSize,
+              });
+              if (refreshed?.data?.length) {
+                setSearchResult(refreshed);
+                savePersistedState("search", {
+                  competitor_id: searchCompetitorId,
+                  query: searchQuery,
+                  result: refreshed,
+                  updated_at: new Date().toISOString(),
+                });
+                return;
+              }
+            } catch {
+              // ignore refresh errors
+            }
+          }
           try {
             const stored = await api.getProducts();
             const fallback = filterStoredProducts(stored, {
@@ -810,7 +870,7 @@ export default function SearchPage() {
               </div>
             </div>
           )}
-          {searchResult.failed?.length > 0 && (
+          {searchResult.failed?.length > 0 && !searchResult.data?.length && (
             <div className="alert alert-warning mt-2">
               Failed searches: {searchResult.failed.join(", ")}
             </div>
