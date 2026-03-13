@@ -1677,8 +1677,10 @@ app.get("/api/competitors/:id/search", async (req, res) => {
     }
     if (isVivo) {
       const filtered = products.filter(isVivoBrandItem);
-      products.length = 0;
-      products.push(...filtered);
+      if (filtered.length) {
+        products.length = 0;
+        products.push(...filtered);
+      }
     }
 
     const storeCurrency = await fetchShopCurrency(competitor.website);
