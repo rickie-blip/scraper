@@ -2,11 +2,7 @@
   "version": 2,
   "builds": [
     { "src": "Backend/server.js", "use": "@vercel/node" },
-    {
-      "src": "Frontend/package.json",
-      "use": "@vercel/static-build",
-      "config": { "distDir": "Frontend/dist" }
-    }
+    { "src": "Frontend/package.json", "use": "@vercel/static-build", "config": { "distDir": "dist" } }
   ],
   "routes": [
     { "handle": "filesystem" },
@@ -15,6 +11,6 @@
     { "src": "/scrape-.*", "dest": "Backend/server.js" },
     { "src": "/ikojn-dresses", "dest": "Backend/server.js" },
     { "src": "/nalani-dresses-collection", "dest": "Backend/server.js" },
-    { "src": "/(.*)", "dest": "Frontend/dist/index.html" }
+    { "src": "/(.*)", "dest": "index.html" }
   ]
 }
