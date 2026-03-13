@@ -1,8 +1,8 @@
 {
   "counters": {
     "competitor": 7,
-    "product": 905,
-    "history": 1749
+    "product": 914,
+    "history": 1758
   },
   "competitors": [
     {
@@ -10902,6 +10902,114 @@
       "currency": "KES",
       "latest_price": 0,
       "latest_collected_at": "2026-03-13T06:09:37.156Z"
+    },
+    {
+      "id": 905,
+      "competitor_id": 6,
+      "competitor_name": "ikojn",
+      "product_name": "<img loading=\"lazy\" class=\"rimage__image\" src=\"//www.ikojn.com/cdn/shop/files/WQP06339-Edit_1024x1024.jpg?v=1744179416\" alt=\"\">",
+      "category": "dresses",
+      "product_url": "https://www.ikojn.com/products/fluid-semi-fitted-pants-in-midnight?_pos=17&_sid=4a95a8fe3&_ss=r",
+      "image": "https://www.ikojn.com/cdn/shop/files/WQP06339-Edit_%7Bwidth%7Dx.jpg?v=1744179416",
+      "currency": "KES",
+      "latest_price": 0,
+      "latest_collected_at": "2026-03-13T06:26:18.752Z"
+    },
+    {
+      "id": 906,
+      "competitor_id": 6,
+      "competitor_name": "ikojn",
+      "product_name": "<img loading=\"lazy\" class=\"rimage__image\" src=\"//www.ikojn.com/cdn/shop/files/WQP6785-Edit_cc68499e-3336-4252-9d9a-bc137d77cb95_1024x1024.jpg?v=1769154963\" alt=\"\">",
+      "category": "dresses",
+      "product_url": "https://www.ikojn.com/products/molten-satin-pants-in-midnight?_pos=18&_sid=4a95a8fe3&_ss=r",
+      "image": "https://www.ikojn.com/cdn/shop/files/WQP6785-Edit_cc68499e-3336-4252-9d9a-bc137d77cb95_%7Bwidth%7Dx.jpg?v=1769154963",
+      "currency": "KES",
+      "latest_price": 0,
+      "latest_collected_at": "2026-03-13T06:26:18.752Z"
+    },
+    {
+      "id": 907,
+      "competitor_id": 6,
+      "competitor_name": "ikojn",
+      "product_name": "<img loading=\"lazy\" class=\"rimage__image\" src=\"//www.ikojn.com/cdn/shop/files/WQP6731-Edit_1024x1024.jpg?v=1769152287\" alt=\"\">",
+      "category": "dresses",
+      "product_url": "https://www.ikojn.com/products/molten-satin-wide-leg-pants-in-burgundy?_pos=19&_sid=4a95a8fe3&_ss=r",
+      "image": "https://www.ikojn.com/cdn/shop/files/WQP6731-Edit_%7Bwidth%7Dx.jpg?v=1769152287",
+      "currency": "KES",
+      "latest_price": 0,
+      "latest_collected_at": "2026-03-13T06:26:18.752Z"
+    },
+    {
+      "id": 908,
+      "competitor_id": 6,
+      "competitor_name": "ikojn",
+      "product_name": "<img loading=\"lazy\" class=\"rimage__image\" src=\"//www.ikojn.com/cdn/shop/files/WQP7886-Edit_1024x1024.jpg?v=1755254658\" alt=\"Women’s dark wash denim trench coat with belted waist and longline cut, stylish outerwear fashion Kenya.\">",
+      "category": "dresses",
+      "product_url": "https://www.ikojn.com/products/deepwater-denim-trench-coat?_pos=20&_sid=4a95a8fe3&_ss=r",
+      "image": "https://www.ikojn.com/cdn/shop/files/WQP7886-Edit_%7Bwidth%7Dx.jpg?v=1755254658",
+      "currency": "KES",
+      "latest_price": 0,
+      "latest_collected_at": "2026-03-13T06:26:18.752Z"
+    },
+    {
+      "id": 909,
+      "competitor_id": 6,
+      "competitor_name": "ikojn",
+      "product_name": "<img loading=\"lazy\" class=\"rimage__image\" src=\"//www.ikojn.com/cdn/shop/files/WQP6701-Edit_1024x1024.jpg?v=1769151166\" alt=\"\">",
+      "category": "dresses",
+      "product_url": "https://www.ikojn.com/products/molten-satin-pants-in-tan?_pos=21&_sid=4a95a8fe3&_ss=r",
+      "image": "https://www.ikojn.com/cdn/shop/files/WQP6701-Edit_%7Bwidth%7Dx.jpg?v=1769151166",
+      "currency": "KES",
+      "latest_price": 0,
+      "latest_collected_at": "2026-03-13T06:26:18.752Z"
+    },
+    {
+      "id": 910,
+      "competitor_id": 6,
+      "competitor_name": "ikojn",
+      "product_name": "<img loading=\"lazy\" class=\"rimage__image\" src=\"//www.ikojn.com/cdn/shop/files/WQP5930_1024x1024.jpg?v=1764160753\" alt=\"\"> New in",
+      "category": "dresses",
+      "product_url": "https://www.ikojn.com/products/cap-sleeve-v-neck-crop-tee-in-cherry-red?_pos=22&_sid=4a95a8fe3&_ss=r",
+      "image": "https://www.ikojn.com/cdn/shop/files/WQP5930_%7Bwidth%7Dx.jpg?v=1764160753",
+      "currency": "KES",
+      "latest_price": 0,
+      "latest_collected_at": "2026-03-13T06:26:18.752Z"
+    },
+    {
+      "id": 911,
+      "competitor_id": 6,
+      "competitor_name": "ikojn",
+      "product_name": "<img loading=\"lazy\" class=\"rimage__image\" src=\"//www.ikojn.com/cdn/shop/files/WQP5811-Edit_1024x1024.jpg?v=1765290627\" alt=\"\">",
+      "category": "dresses",
+      "product_url": "https://www.ikojn.com/products/shorts?_pos=23&_sid=4a95a8fe3&_ss=r",
+      "image": "https://www.ikojn.com/cdn/shop/files/WQP5811-Edit_%7Bwidth%7Dx.jpg?v=1765290627",
+      "currency": "KES",
+      "latest_price": 0,
+      "latest_collected_at": "2026-03-13T06:26:18.752Z"
+    },
+    {
+      "id": 912,
+      "competitor_id": 6,
+      "competitor_name": "ikojn",
+      "product_name": "<img loading=\"lazy\" class=\"rimage__image\" src=\"//www.ikojn.com/cdn/shop/files/WQP5911_1024x1024.jpg?v=1764160386\" alt=\"\"> New in",
+      "category": "dresses",
+      "product_url": "https://www.ikojn.com/products/cap-sleeve-v-neck-crop-tee-in-blue?_pos=24&_sid=4a95a8fe3&_ss=r",
+      "image": "https://www.ikojn.com/cdn/shop/files/WQP5911_%7Bwidth%7Dx.jpg?v=1764160386",
+      "currency": "KES",
+      "latest_price": 0,
+      "latest_collected_at": "2026-03-13T06:26:18.752Z"
+    },
+    {
+      "id": 913,
+      "competitor_id": 6,
+      "competitor_name": "ikojn",
+      "product_name": "<img loading=\"lazy\" class=\"rimage__image\" src=\"//www.ikojn.com/cdn/shop/files/WQP6188-Edit_1024x1024.jpg?v=1764226105\" alt=\"\">",
+      "category": "dresses",
+      "product_url": "https://www.ikojn.com/products/hula-flow-maxi-skirt-in-pearl-white?_pos=7&_sid=b993a1bad&_ss=r",
+      "image": "https://www.ikojn.com/cdn/shop/files/WQP6188-Edit_%7Bwidth%7Dx.jpg?v=1764226105",
+      "currency": "KES",
+      "latest_price": 0,
+      "latest_collected_at": "2026-03-13T06:26:18.752Z"
     }
   ],
   "history": [
@@ -21392,6 +21500,60 @@
       "product_id": 874,
       "price": 5500,
       "collected_at": "2026-03-13T06:09:37.156Z"
+    },
+    {
+      "id": 1749,
+      "product_id": 905,
+      "price": 0,
+      "collected_at": "2026-03-13T06:26:18.752Z"
+    },
+    {
+      "id": 1750,
+      "product_id": 906,
+      "price": 0,
+      "collected_at": "2026-03-13T06:26:18.752Z"
+    },
+    {
+      "id": 1751,
+      "product_id": 907,
+      "price": 0,
+      "collected_at": "2026-03-13T06:26:18.752Z"
+    },
+    {
+      "id": 1752,
+      "product_id": 908,
+      "price": 0,
+      "collected_at": "2026-03-13T06:26:18.752Z"
+    },
+    {
+      "id": 1753,
+      "product_id": 909,
+      "price": 0,
+      "collected_at": "2026-03-13T06:26:18.752Z"
+    },
+    {
+      "id": 1754,
+      "product_id": 910,
+      "price": 0,
+      "collected_at": "2026-03-13T06:26:18.752Z"
+    },
+    {
+      "id": 1755,
+      "product_id": 911,
+      "price": 0,
+      "collected_at": "2026-03-13T06:26:18.752Z"
+    },
+    {
+      "id": 1756,
+      "product_id": 912,
+      "price": 0,
+      "collected_at": "2026-03-13T06:26:18.752Z"
+    },
+    {
+      "id": 1757,
+      "product_id": 913,
+      "price": 0,
+      "collected_at": "2026-03-13T06:26:18.752Z"
     }
   ],
   "dashboard": {
@@ -25653,11 +25815,11 @@
         ],
         "failed": []
       },
-      "updated_at": "2026-03-13T06:09:20.198Z"
+      "updated_at": "2026-03-13T06:26:03.036Z"
     },
     "search_cache": {
       "1:dresses": {
-        "at": 1773381999853,
+        "at": 1773383072784,
         "data": [
           {
             "title": "Vivo Sleeveless Bodycon in Stretch Rib - Wine Red",
@@ -27634,13 +27796,13 @@
           }
         ],
         "persisted": {
-          "created": 1,
-          "updated": 100,
-          "history": 101
+          "created": 0,
+          "updated": 101,
+          "history": 0
         }
       },
       "4:dresses": {
-        "at": 1773382115226,
+        "at": 1773383127954,
         "data": [
           {
             "title": "Somali Printed Maxi Dress with Side Pocket – Available in Two Colours",
@@ -29483,13 +29645,13 @@
           }
         ],
         "persisted": {
-          "created": 20,
-          "updated": 97,
-          "history": 117
+          "created": 0,
+          "updated": 117,
+          "history": 0
         }
       },
       "5:dresses": {
-        "at": 1773382160198,
+        "at": 1773383163036,
         "data": [
           {
             "title": "Mango dress kate",
@@ -33742,11 +33904,11 @@
         "persisted": {
           "created": 0,
           "updated": 200,
-          "history": 200
+          "history": 0
         }
       },
       "6:dresses": {
-        "at": 1773322868775,
+        "at": 1773382177220,
         "data": [
           {
             "title": "Dynasty Shift Dress In Thalia",
@@ -35145,7 +35307,7 @@
             "price": null,
             "currency": "KES",
             "image": "https://www.ikojn.com/cdn/shop/files/WQP06339-Edit_%7Bwidth%7Dx.jpg?v=1744179416",
-            "url": "https://www.ikojn.com/products/fluid-semi-fitted-pants-in-midnight?_pos=17&_sid=9bee11eea&_ss=r",
+            "url": "https://www.ikojn.com/products/fluid-semi-fitted-pants-in-midnight?_pos=17&_sid=0b1a0c470&_ss=r",
             "brand": "ikojn",
             "compareAtPrice": null,
             "original_currency": null,
@@ -35156,7 +35318,7 @@
             "price": null,
             "currency": "KES",
             "image": "https://www.ikojn.com/cdn/shop/files/WQP6785-Edit_cc68499e-3336-4252-9d9a-bc137d77cb95_%7Bwidth%7Dx.jpg?v=1769154963",
-            "url": "https://www.ikojn.com/products/molten-satin-pants-in-midnight?_pos=18&_sid=9bee11eea&_ss=r",
+            "url": "https://www.ikojn.com/products/molten-satin-pants-in-midnight?_pos=18&_sid=0b1a0c470&_ss=r",
             "brand": "ikojn",
             "compareAtPrice": null,
             "original_currency": null,
@@ -35167,7 +35329,7 @@
             "price": null,
             "currency": "KES",
             "image": "https://www.ikojn.com/cdn/shop/files/WQP6731-Edit_%7Bwidth%7Dx.jpg?v=1769152287",
-            "url": "https://www.ikojn.com/products/molten-satin-wide-leg-pants-in-burgundy?_pos=19&_sid=9bee11eea&_ss=r",
+            "url": "https://www.ikojn.com/products/molten-satin-wide-leg-pants-in-burgundy?_pos=19&_sid=0b1a0c470&_ss=r",
             "brand": "ikojn",
             "compareAtPrice": null,
             "original_currency": null,
@@ -35178,7 +35340,7 @@
             "price": null,
             "currency": "KES",
             "image": "https://www.ikojn.com/cdn/shop/files/WQP7886-Edit_%7Bwidth%7Dx.jpg?v=1755254658",
-            "url": "https://www.ikojn.com/products/deepwater-denim-trench-coat?_pos=20&_sid=9bee11eea&_ss=r",
+            "url": "https://www.ikojn.com/products/deepwater-denim-trench-coat?_pos=20&_sid=0b1a0c470&_ss=r",
             "brand": "ikojn",
             "compareAtPrice": null,
             "original_currency": null,
@@ -35189,7 +35351,7 @@
             "price": null,
             "currency": "KES",
             "image": "https://www.ikojn.com/cdn/shop/files/WQP6701-Edit_%7Bwidth%7Dx.jpg?v=1769151166",
-            "url": "https://www.ikojn.com/products/molten-satin-pants-in-tan?_pos=21&_sid=9bee11eea&_ss=r",
+            "url": "https://www.ikojn.com/products/molten-satin-pants-in-tan?_pos=21&_sid=0b1a0c470&_ss=r",
             "brand": "ikojn",
             "compareAtPrice": null,
             "original_currency": null,
@@ -35200,7 +35362,7 @@
             "price": null,
             "currency": "KES",
             "image": "https://www.ikojn.com/cdn/shop/files/WQP5930_%7Bwidth%7Dx.jpg?v=1764160753",
-            "url": "https://www.ikojn.com/products/cap-sleeve-v-neck-crop-tee-in-cherry-red?_pos=22&_sid=9bee11eea&_ss=r",
+            "url": "https://www.ikojn.com/products/cap-sleeve-v-neck-crop-tee-in-cherry-red?_pos=22&_sid=0b1a0c470&_ss=r",
             "brand": "ikojn",
             "compareAtPrice": null,
             "original_currency": null,
@@ -35211,7 +35373,7 @@
             "price": null,
             "currency": "KES",
             "image": "https://www.ikojn.com/cdn/shop/files/WQP5811-Edit_%7Bwidth%7Dx.jpg?v=1765290627",
-            "url": "https://www.ikojn.com/products/shorts?_pos=23&_sid=9bee11eea&_ss=r",
+            "url": "https://www.ikojn.com/products/shorts?_pos=23&_sid=0b1a0c470&_ss=r",
             "brand": "ikojn",
             "compareAtPrice": null,
             "original_currency": null,
@@ -35222,7 +35384,7 @@
             "price": null,
             "currency": "KES",
             "image": "https://www.ikojn.com/cdn/shop/files/WQP5911_%7Bwidth%7Dx.jpg?v=1764160386",
-            "url": "https://www.ikojn.com/products/cap-sleeve-v-neck-crop-tee-in-blue?_pos=24&_sid=9bee11eea&_ss=r",
+            "url": "https://www.ikojn.com/products/cap-sleeve-v-neck-crop-tee-in-blue?_pos=24&_sid=0b1a0c470&_ss=r",
             "brand": "ikojn",
             "compareAtPrice": null,
             "original_currency": null,
@@ -35233,7 +35395,7 @@
             "price": null,
             "currency": "KES",
             "image": "https://www.ikojn.com/cdn/shop/files/WQP6188-Edit_%7Bwidth%7Dx.jpg?v=1764226105",
-            "url": "https://www.ikojn.com/products/hula-flow-maxi-skirt-in-pearl-white?_pos=7&_sid=3cff85cfa&_ss=r",
+            "url": "https://www.ikojn.com/products/hula-flow-maxi-skirt-in-pearl-white?_pos=7&_sid=06088f92e&_ss=r",
             "brand": "ikojn",
             "compareAtPrice": null,
             "original_currency": null,
@@ -35827,13 +35989,13 @@
           }
         ],
         "persisted": {
-          "created": 139,
-          "updated": 0,
+          "created": 9,
+          "updated": 130,
           "history": 139
         }
       },
       "2:dresses": {
-        "at": 1773382011481,
+        "at": 1773383084244,
         "data": [
           {
             "title": "Safari Short Shirtdress - Navy Blue",
@@ -38124,11 +38286,11 @@
         "persisted": {
           "created": 0,
           "updated": 117,
-          "history": 117
+          "history": 0
         }
       },
       "3:dresses": {
-        "at": 1773382046329,
+        "at": 1773383108628,
         "data": [
           {
             "title": "MIDI 01025",
@@ -41309,7 +41471,7 @@
         "persisted": {
           "created": 0,
           "updated": 200,
-          "history": 200
+          "history": 0
         }
       }
     },
