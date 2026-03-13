@@ -1,16 +1,18 @@
 {
   "version": 2,
-  "builds": [
-    { "src": "Backend/server.js", "use": "@vercel/node" },
-    { "src": "Frontend/package.json", "use": "@vercel/static-build", "config": { "distDir": "dist" } }
-  ],
-  "routes": [
-    { "handle": "filesystem" },
-    { "src": "/api/(.*)", "dest": "Backend/server.js" },
-    { "src": "/search-.*", "dest": "Backend/server.js" },
-    { "src": "/scrape-.*", "dest": "Backend/server.js" },
-    { "src": "/ikojn-dresses", "dest": "Backend/server.js" },
-    { "src": "/nalani-dresses-collection", "dest": "Backend/server.js" },
-    { "src": "/(.*)", "dest": "index.html" }
+  "buildCommand": "npm run build --prefix Frontend",
+  "outputDirectory": "Frontend/dist",
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index.js" },
+    { "source": "/search-:path*", "destination": "/api/index.js" },
+    { "source": "/scrape-:path*", "destination": "/api/index.js" },
+    { "source": "/ikojn-dresses", "destination": "/api/index.js" },
+    { "source": "/nalani-dresses-collection", "destination": "/api/index.js" },
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

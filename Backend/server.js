@@ -3026,9 +3026,10 @@ app.get("/nalani-dresses-collection", async (req, res) => {
 });
 
 
-app.listen(PORT, () => {
-  console.log(`Server is running on localhost:${PORT}`);
-});
-
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`Server is running on localhost:${PORT}`);
+  });
+}
 
 export default app;
