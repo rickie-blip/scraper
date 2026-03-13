@@ -24,17 +24,17 @@ const LANGFLOW_FLOW_ID = process.env.LANGFLOW_FLOW_ID || "";
 const LANGFLOW_API_KEY = process.env.LANGFLOW_API_KEY || "";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DATA_DIR = path.join(__dirname, "data");
+const IS_VERCEL = Boolean(process.env.VERCEL);
+const DATA_DIR = IS_VERCEL ? path.join("/tmp", "c-analyze-data") : path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "store.json");
 const COLLECTION_OVERRIDES_FILE = path.join(__dirname, "collection_overrides.json");
 const BRAND_CURRENCY = {
   Vivo: "KES",
   Nalani: "KES",
   Neviive: "KES",
-  Diracfashion: "KES",
+  Diracfashion: "USD",
 };
 const HOST_CURRENCY_OVERRIDES = {
-  "diracfashion.com": "KES",
 };
 const DEFAULT_COMPETITORS = [
   { name: "Vivo", website: "https://pay.shopzetu.com", currency: BRAND_CURRENCY.Vivo },
@@ -71,7 +71,11 @@ function resolveBrandCurrency(brand) {
 
 function resolveForcedCurrency(competitorName, currency) {
   const name = String(competitorName || "").toLowerCase();
-  if (name === "diracfashion") return "KES";
+  if (name === "diracfashion") {
+    const normalized = normalizeCurrencyCode(currency);
+    if (!normalized || normalized === "KES") return "USD";
+    return normalized;
+  }
   return currency;
 }
 
@@ -193,28 +197,6 @@ async function readStore() {
     store.counters.competitor = seededCompetitors.length + 1;
     store.seeded = true;
     storeChanged = true;
-  }
-  if (Array.isArray(store.competitors)) {
-    for (const competitor of store.competitors) {
-      if (String(competitor.name).toLowerCase() === "diracfashion") {
-        const normalized = normalizeCurrencyCode(competitor.currency);
-        if (normalized !== "KES") {
-          competitor.currency = "KES";
-          storeChanged = true;
-        }
-      }
-    }
-  }
-  if (Array.isArray(store.products)) {
-    for (const product of store.products) {
-      if (String(product.competitor_name).toLowerCase() === "diracfashion") {
-        const normalized = normalizeCurrencyCode(product.currency);
-        if (normalized !== "KES") {
-          product.currency = "KES";
-          storeChanged = true;
-        }
-      }
-    }
   }
   if (pruneStore(store, 7)) {
     storeChanged = true;

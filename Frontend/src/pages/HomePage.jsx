@@ -74,14 +74,15 @@ export default function HomePage() {
     if (saved && !comparison) {
       if (saved.category) setCategory(saved.category);
       if (saved.base_competitor) setBaseCompetitor(saved.base_competitor);
-      const savedCurrency = saved?.comparison?.base_currency;
-      if (saved.comparison && (!savedCurrency || savedCurrency === "KES")) {
+      if (saved.comparison) {
         setComparison(saved.comparison);
         setLastLoadedFilters({
           category: saved.category || category,
           base_competitor: saved.base_competitor || "",
         });
       }
+      if (saved.price_series) setPriceSeries(saved.price_series);
+      if (saved.price_labels) setPriceLabels(saved.price_labels);
     }
     setComparisonHydrated(true);
   }, [comparison, category]);
@@ -120,7 +121,7 @@ export default function HomePage() {
 
   async function runSearch() {
     setSearchLoading(true);
-    setSearchMessage("");
+    setSearchMessage("Search in progress. This can take a while, please be patient.");
     try {
       await loadComparison();
       await loadPriceSeries();
@@ -224,10 +225,11 @@ export default function HomePage() {
         <div className="grid-row">
           <button
             type="button"
-            className="btn btn-outline-primary"
+            className="btn btn-outline-primary btn-with-spinner"
             onClick={runSearch}
             disabled={searchLoading}
           >
+            {searchLoading && <span className="btn-spinner" aria-hidden="true" />}
             {searchLoading ? "Running Search..." : "Run Category Search"}
           </button>
           <Link to="/search" className="btn btn-outline-primary">
@@ -277,7 +279,7 @@ export default function HomePage() {
             ))}
           </select>
             <button
-              className="btn btn-primary"
+              className="btn btn-primary btn-with-spinner"
               type="button"
               onClick={() => {
                 loadComparison();
@@ -285,6 +287,7 @@ export default function HomePage() {
               }}
               disabled={comparisonLoading}
             >
+              {comparisonLoading && <span className="btn-spinner" aria-hidden="true" />}
               {comparisonLoading ? "Loading..." : "Refresh"}
             </button>
         </div>

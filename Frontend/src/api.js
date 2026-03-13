@@ -1,5 +1,5 @@
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000/api";
-const PUBLIC_BASE = import.meta.env.VITE_PUBLIC_BASE || "http://localhost:5000";
+const API_BASE = import.meta.env.VITE_API_BASE || "/api";
+const PUBLIC_BASE = import.meta.env.VITE_PUBLIC_BASE || "";
 
 async function request(base, path, options = {}) {
   const res = await fetch(`${base}${path}`, {
