@@ -1074,7 +1074,7 @@ async function shopifySearchProducts(website, query) {
   const products = data?.resources?.results?.products || [];
   return products.map((p) => ({
     title: p.title,
-    price: Number(p.price),
+    price: normalizeMoney(p.price),
     image: normalizeImageUrl(parsed.origin, p.image),
     vendor: p.vendor || p.vendorName || p.brand?.name || null,
     currency: p.currency || storeCurrency || null,
@@ -2557,7 +2557,7 @@ app.get("/search-nalani-bodycons", async (req, res) => {
     const products =
       data.resources?.results?.products?.map((p) => ({
         title: p.title,
-        price: Number(p.price), // convert cents to base currency
+        price: normalizeMoney(p.price),
         image: p.image,
         url: "https://nalaniwomen.com" + p.url,
         brand,
@@ -2604,7 +2604,7 @@ app.get("/search-neviive-bodycons", async (req, res) => {
     const products =
       data.resources?.results?.products?.map((p) => ({
         title: p.title,
-        price: Number(p.price), // convert cents to base currency
+        price: normalizeMoney(p.price),
         image: p.image,
         url: "https://neviive.com" + p.url,
         brand,
@@ -2652,7 +2652,7 @@ app.get("/search-dirac-bodycons", async (req, res) => {
     const products =
       data.resources?.results?.products?.map((p) => ({
         title: p.title,
-        price: Number(p.price), // convert cents to base currency
+        price: normalizeMoney(p.price),
         image: p.image,
         url: "https://diracfashion.com" + p.url,
         brand,
@@ -2700,7 +2700,7 @@ app.get("/search-vivo-bodysuits", async (req, res) => {
     const products =
       data.resources?.results?.products?.map((p) => ({
         title: p.title,
-        price: Number(p.price), // convert cents to base currency
+        price: normalizeMoney(p.price),
         image: p.image,
         url: "https://shopzetu.com" + p.url,
         brand,
@@ -2747,7 +2747,7 @@ app.get("/search-nalani-bodysuits", async (req, res) => {
     const products =
       data.resources?.results?.products?.map((p) => ({
         title: p.title,
-        price: Number(p.price), // convert cents to base currency
+        price: normalizeMoney(p.price),
         image: p.image,
         url: "https://nalaniwomen.com" + p.url,
         brand,
@@ -2794,7 +2794,7 @@ app.get("/search-neviive-bodysuits", async (req, res) => {
     const products =
       data.resources?.results?.products?.map((p) => ({
         title: p.title,
-        price: Number(p.price), // convert cents to base currency
+        price: normalizeMoney(p.price),
         image: p.image,
         url: "https://neviive.com" + p.url,
         brand,
@@ -2842,7 +2842,7 @@ app.get("/search-dirac-bodysuits", async (req, res) => {
     const products =
       data.resources?.results?.products?.map((p) => ({
         title: p.title,
-        price: Number(p.price), // convert cents to base currency
+        price: normalizeMoney(p.price),
         image: p.image,
         url: "https://diracfashion.com" + p.url,
         brand,
@@ -2891,7 +2891,7 @@ app.get("/search-vivo-dresses", async (req, res) => {
     const products =
       data.resources?.results?.products?.map((p) => ({
         title: p.title,
-        price: Number(p.price), // convert cents to base currency
+        price: normalizeMoney(p.price),
         image: p.image,
         url: "https://shopzetu.com" + p.url,
         brand,
@@ -2938,7 +2938,7 @@ app.get("/search-nalani-dresses", async (req, res) => {
     const products =
       data.resources?.results?.products?.map((p) => ({
         title: p.title,
-        price: Number(p.price), // convert cents to base currency
+        price: normalizeMoney(p.price),
         image: p.image,
         url: "https://nalaniwomen.com" + p.url,
         brand,
@@ -2985,7 +2985,7 @@ app.get("/search-neviive-dresses", async (req, res) => {
     const products =
       data.resources?.results?.products?.map((p) => ({
         title: p.title,
-        price: Number(p.price), // convert cents to base currency
+        price: normalizeMoney(p.price),
         image: p.image,
         url: "https://neviive.com" + p.url,
         brand,
@@ -3032,7 +3032,7 @@ app.get("/search-dirac-dresses", async (req, res) => {
     const products =
       data.resources?.results?.products?.map((p) => ({
         title: p.title,
-        price: Number(p.price), // convert cents to base currency
+        price: normalizeMoney(p.price),
         image: p.image,
         url: "https://diracfashion.com" + p.url,
         brand,
