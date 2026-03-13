@@ -330,11 +330,6 @@ function resolveForcedCurrency(competitorName, currency) {
 function getCompetitorWebsites(competitor) {
   const websites = new Set();
   if (competitor?.website) websites.add(String(competitor.website));
-  if (String(competitor?.name || "").toLowerCase() === "vivo") {
-    websites.add("https://pay.shopzetu.com");
-    websites.add("https://shopzetu.com");
-    websites.add("https://www.shopzetu.com");
-  }
   return Array.from(websites).filter((website) => {
     try {
       new URL(website);
@@ -345,19 +340,8 @@ function getCompetitorWebsites(competitor) {
   });
 }
 
-function isVivoBrandItem(item) {
-  const title = String(item?.title || item?.product_name || "").toLowerCase();
-  if (title.includes("vivo")) return true;
-  if (title.includes("zoya")) return true;
-  if (title.includes("safari")) {
-    try {
-      const host = new URL(item?.url || item?.product_url || "").host.replace(/^www\./, "");
-      if (host === "shopzetu.com" || host === "pay.shopzetu.com") return true;
-    } catch {
-      // ignore invalid URLs
-    }
-  }
-  return false;
+function isVivoBrandItem() {
+  return true;
 }
 
 function normalizeLangflowHost(host) {
@@ -1754,7 +1738,6 @@ app.get("/api/competitors/:id/search", async (req, res) => {
 
     const products = [];
     const seenUrls = new Set();
-    const isVivo = String(competitor.name || "").toLowerCase() === "vivo";
     const maxResults = 30;
 
     function addProducts(items) {
@@ -1885,13 +1868,6 @@ app.get("/api/competitors/:id/search", async (req, res) => {
         } catch {
           // ignore fallback errors
         }
-      }
-    }
-    if (isVivo) {
-      const filtered = products.filter(isVivoBrandItem);
-      if (filtered.length) {
-        products.length = 0;
-        products.push(...filtered);
       }
     }
 
