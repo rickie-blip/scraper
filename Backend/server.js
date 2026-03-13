@@ -24,6 +24,7 @@ const LANGFLOW_HOST = process.env.LANGFLOW_HOST || "";
 const LANGFLOW_FLOW_ID = process.env.LANGFLOW_FLOW_ID || "";
 const LANGFLOW_API_KEY = process.env.LANGFLOW_API_KEY || "";
 const DATABASE_URL = process.env.DATABASE_URL || "";
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const IS_VERCEL = Boolean(process.env.VERCEL);
@@ -303,6 +304,78 @@ async function migrateAppStateToDbIfNeeded(pool) {
   await saveStoreToDb(pool, store);
   await pool.query("DELETE FROM app_state WHERE key = $1", ["store"]);
   return true;
+}
+
+function requireAdmin(req, res) {
+  const token =
+    req.headers["x-admin-token"] ||
+    req.query.admin_token ||
+    req.query.token ||
+    "";
+  if (!ADMIN_TOKEN || token !== ADMIN_TOKEN) {
+    res.status(401).json({ error: "Unauthorized" });
+    return false;
+  }
+  return true;
+}
+
+function sanitizeStoreForImport(store) {
+  const byCompetitorUrl = new Map();
+  const dedupedCompetitors = [];
+  for (const competitor of store.competitors || []) {
+    const website = String(competitor.website || "").trim();
+    if (!website) continue;
+    const key = website.toLowerCase();
+    if (byCompetitorUrl.has(key)) continue;
+    byCompetitorUrl.set(key, competitor);
+    dedupedCompetitors.push(competitor);
+  }
+
+  const competitorIdMap = new Map();
+  for (const competitor of dedupedCompetitors) {
+    competitorIdMap.set(competitor.id, competitor);
+  }
+
+  const productByKey = new Map();
+  const sanitizedProducts = [];
+  for (const product of store.products || []) {
+    const productUrl = String(product.product_url || "").trim();
+    if (!productUrl) continue;
+    const competitorId = product.competitor_id;
+    if (!competitorIdMap.has(competitorId)) continue;
+    const key = `${competitorId}::${productUrl.toLowerCase()}`;
+    if (productByKey.has(key)) continue;
+    const latestPrice = sanitizeKesPrice(product.latest_price);
+    productByKey.set(key, true);
+    sanitizedProducts.push({
+      ...product,
+      latest_price: latestPrice,
+    });
+  }
+
+  const productIds = new Set(sanitizedProducts.map((p) => p.id));
+  const historyByKey = new Set();
+  const sanitizedHistory = [];
+  for (const entry of store.history || []) {
+    if (!productIds.has(entry.product_id)) continue;
+    const collectedDay = String(entry.collected_at || "").slice(0, 10);
+    const price = sanitizeKesPrice(entry.price);
+    if (price == null) continue;
+    const key = `${entry.product_id}::${price}::${collectedDay}`;
+    if (historyByKey.has(key)) continue;
+    historyByKey.add(key);
+    sanitizedHistory.push({
+      ...entry,
+      price,
+    });
+  }
+
+  return {
+    ...store,
+    competitors: dedupedCompetitors,
+    products: sanitizedProducts,
+    history: sanitizedHistory,
+  };
 }
 
 function buildInitialStore(sourceCompetitors) {
@@ -662,8 +735,8 @@ const fxCache = {
 };
 
 const SEARCH_CACHE_TTL_MS = 10 * 60 * 1000;
-const SEARCH_PAGE_SIZE_DEFAULT = 100;
-const SEARCH_PAGE_SIZE_MAX = 200;
+const SEARCH_PAGE_SIZE_DEFAULT = 20;
+const SEARCH_PAGE_SIZE_MAX = 20;
 const searchCache = new Map();
 
 async function fetchFxRatesToKes(currencies = []) {
@@ -1300,6 +1373,11 @@ function matchesQueryItem(item, query) {
   return tokens.every((token) => title.includes(token));
 }
 
+function isVivoVendorItem(item) {
+  const vendor = String(item?.vendor || "").trim().toLowerCase();
+  return vendor === "vivo";
+}
+
 function buildOverrideCandidates(website, competitorName, query, overrides) {
   const origin = new URL(website).origin;
   const host = new URL(website).host.replace(/^www\./, "");
@@ -1536,6 +1614,26 @@ app.get("/", (req, res) => {
 
 app.get("/api/health", (req, res) => {
   res.status(200).json({ ok: true });
+});
+
+app.post("/api/admin/import-store", async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    if (!USE_DB) {
+      return res.status(400).json({ error: "DATABASE_URL is not configured." });
+    }
+    const pool = getDbPool();
+    await ensureDbSchema(pool);
+    const raw = await fs.readFile(DATA_FILE, "utf-8");
+    const store = sanitizeStoreForImport(JSON.parse(raw));
+    if (!store || typeof store !== "object") {
+      return res.status(400).json({ error: "Invalid store.json content." });
+    }
+    await saveStoreToDb(pool, store);
+    res.status(200).json({ ok: true, message: "Imported store.json into database." });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.get("/api/dashboard/state", async (req, res) => {
@@ -1828,7 +1926,7 @@ app.get("/api/competitors/:id/search", async (req, res) => {
 
     const products = [];
     const seenUrls = new Set();
-    const maxResults = 30;
+    const maxResults = 20;
 
     function addProducts(items) {
       if (!Array.isArray(items) || !items.length) return;
@@ -1986,7 +2084,10 @@ app.get("/api/competitors/:id/search", async (req, res) => {
         };
       })
       .filter((item) => isProductUrl(item.url || item.product_url));
-    const filteredData = data.filter((item) => matchesQueryItem(item, effectiveQuery));
+    let filteredData = data.filter((item) => matchesQueryItem(item, effectiveQuery));
+    if (String(competitor.name || "").toLowerCase() === "vivo") {
+      filteredData = filteredData.filter(isVivoVendorItem);
+    }
 
     const missingImages = filteredData.filter((item) => !item.image && item.url);
     if (missingImages.length) {

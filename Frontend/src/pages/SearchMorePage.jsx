@@ -141,7 +141,7 @@ export default function SearchMorePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [page, setPage] = useState(1);
-  const [pageSize] = useState(30);
+  const [pageSize] = useState(20);
 
   const totalPages = useMemo(() => {
     const total = results?.total ?? results?.data?.length ?? 0;
@@ -152,6 +152,7 @@ export default function SearchMorePage() {
     return filterItemsForCompetitor(results.data, brand);
   }, [results, brand]);
   const pagedItems = useMemo(() => filteredItems, [filteredItems]);
+  const displayItems = useMemo(() => pagedItems.slice(0, 10), [pagedItems]);
 
   useEffect(() => {
     let active = true;
@@ -275,7 +276,7 @@ export default function SearchMorePage() {
         <>
           <div className="table-actions">
             <div className="muted">
-              Showing {pagedItems.length} of {results?.total ?? pagedItems.length} items
+              Showing {displayItems.length} of {results?.total ?? pagedItems.length} items
             </div>
             {(results?.total ?? 0) > pageSize && (
               <div className="pager">
@@ -335,7 +336,7 @@ export default function SearchMorePage() {
                 </tr>
               </thead>
               <tbody>
-                {pagedItems.map((item, idx) => {
+                {displayItems.map((item, idx) => {
                   const imageUrl = resolveImage(item);
                   const displayTitle = resolveTitle(item);
                   return (

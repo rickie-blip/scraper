@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { loadPersistedState, savePersistedState } from "../utils/persist";
+import PriceChart from "../PriceChart";
 
 function normalizeCurrency(value) {
   const normalized = String(value || "").trim().toUpperCase();
@@ -22,17 +22,35 @@ function formatPrice(value, currency = "KES") {
 export default function Competitors() {
   const [summary, setSummary] = useState({ total_competitors: 0, total_products: 0, latest_updates: [] });
   const [competitors, setCompetitors] = useState([]);
+  const [products, setProducts] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [competitorForm, setCompetitorForm] = useState({ name: "", website: "", currency: "" });
+  
+  // Competitor management
+  const [competitorForm, setCompetitorForm] = useState({ name: "", website: "", currency: "KES" });
   const [editingCompetitorId, setEditingCompetitorId] = useState(null);
-  const [editCompetitorForm, setEditCompetitorForm] = useState({
-    name: "",
-    website: "",
-    currency: "",
+  const [editCompetitorForm, setEditCompetitorForm] = useState({ name: "", website: "", currency: "" });
+  
+  // Product management
+  const [productForm, setProductForm] = useState({ 
+    competitor_id: "", 
+    product_name: "", 
+    category: "", 
+    product_url: "", 
+    currency: "" 
   });
+  const [scrapeProductMessage, setScrapeProductMessage] = useState("");
+  const [scrapeAllLoading, setScrapeAllLoading] = useState(false);
+  
+  // Price history
+  const [selectedProductHistory, setSelectedProductHistory] = useState(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  
+  // Comparison
   const [comparisonData, setComparisonData] = useState(null);
   const [comparisonFilters, setComparisonFilters] = useState({ base_competitor: "", category: "" });
+  
+  // Live compare
   const [liveCompareForm, setLiveCompareForm] = useState({ product_name: "", base_competitor: "" });
   const [liveCompareResult, setLiveCompareResult] = useState(null);
   const [liveCompareLoading, setLiveCompareLoading] = useState(false);
@@ -56,9 +74,14 @@ export default function Competitors() {
     setLoading(true);
     setError("");
     try {
-      const [s, c] = await Promise.all([api.getSummary(), api.getCompetitors()]);
+      const [s, c, p] = await Promise.all([
+        api.getSummary(), 
+        api.getCompetitors(), 
+        api.getProducts()
+      ]);
       setSummary(s);
       setCompetitors(c);
+      setProducts(p);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -70,29 +93,7 @@ export default function Competitors() {
     loadTracker();
   }, []);
 
-  useEffect(() => {
-    const saved = loadPersistedState("competitors");
-    if (!saved) return;
-    if (saved.comparison?.filters) {
-      setComparisonFilters((prev) => ({
-        ...prev,
-        ...saved.comparison.filters,
-      }));
-    }
-    if (saved.comparison?.result && !comparisonData) {
-      setComparisonData(saved.comparison.result);
-    }
-    if (saved.live_compare?.input) {
-      setLiveCompareForm((prev) => ({
-        ...prev,
-        ...saved.live_compare.input,
-      }));
-    }
-    if (saved.live_compare?.result && !liveCompareResult) {
-      setLiveCompareResult(saved.live_compare.result);
-    }
-  }, [comparisonData, liveCompareResult]);
-
+  // Competitor CRUD
   async function onAddCompetitor(e) {
     e.preventDefault();
     setError("");
@@ -102,9 +103,9 @@ export default function Competitors() {
         setError("Please enter a valid website URL.");
         return;
       }
-      const currency = competitorForm.currency.trim().toUpperCase();
+      const currency = competitorForm.currency.trim().toUpperCase() || "KES";
       await api.addCompetitor({ ...competitorForm, currency, website });
-      setCompetitorForm({ name: "", website: "", currency: "" });
+      setCompetitorForm({ name: "", website: "", currency: "KES" });
       await loadTracker();
     } catch (err) {
       setError(err.message);
@@ -164,25 +165,91 @@ export default function Competitors() {
     }
   }
 
-  async function loadComparison() {
+  // Product management
+  async function onAddProduct(e) {
+    e.preventDefault();
     setError("");
     try {
-      const data = await api.getComparison(comparisonFilters);
-      setComparisonData(data);
-      const saved = loadPersistedState("competitors") || {};
-      savePersistedState("competitors", {
-        ...saved,
-        comparison: {
-          filters: comparisonFilters,
-          result: data,
-          updated_at: new Date().toISOString(),
-        },
+      const website = normalizeWebsiteUrl(productForm.product_url);
+      if (!isValidWebsiteUrl(website)) {
+        setError("Please enter a valid product URL.");
+        return;
+      }
+      const currency = productForm.currency.trim().toUpperCase();
+      await api.addProduct({ ...productForm, currency, product_url: website });
+      setProductForm({ 
+        competitor_id: "", 
+        product_name: "", 
+        category: "", 
+        product_url: "", 
+        currency: "" 
       });
+      await loadTracker();
     } catch (err) {
       setError(err.message);
     }
   }
 
+  async function onScrapeProduct(productId) {
+    setError("");
+    setScrapeProductMessage("");
+    try {
+      const res = await api.scrapeProduct(productId);
+      await loadTracker();
+      if (res?.entry?.price != null) {
+        const product = products.find((item) => String(item.id) === String(productId));
+        const productCurrency = product?.currency || product?.competitor_currency || "KES";
+        setScrapeProductMessage(
+          `Scrape succeeded. Latest price: ${formatPrice(res.entry.price, productCurrency)}.`
+        );
+      }
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function onScrapeAll() {
+    setError("");
+    setScrapeAllLoading(true);
+    try {
+      const res = await api.scrapeAll();
+      await loadTracker();
+      const successCount = res.results?.filter(r => r.ok).length || 0;
+      const failCount = res.results?.filter(r => !r.ok).length || 0;
+      setScrapeProductMessage(`Scrape completed: ${successCount} succeeded, ${failCount} failed.`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setScrapeAllLoading(false);
+    }
+  }
+
+  // Price history
+  async function viewProductHistory(productId) {
+    setHistoryLoading(true);
+    setError("");
+    try {
+      const data = await api.getHistory(productId);
+      setSelectedProductHistory(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  // Comparison
+  async function loadComparison() {
+    setError("");
+    try {
+      const data = await api.getComparison(comparisonFilters);
+      setComparisonData(data);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  // Live compare
   async function onLiveCompare(e) {
     e.preventDefault();
     setError("");
@@ -191,15 +258,6 @@ export default function Competitors() {
     try {
       const res = await api.liveCompare(liveCompareForm);
       setLiveCompareResult(res);
-      const saved = loadPersistedState("competitors") || {};
-      savePersistedState("competitors", {
-        ...saved,
-        live_compare: {
-          input: liveCompareForm,
-          result: res,
-          updated_at: new Date().toISOString(),
-        },
-      });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -212,7 +270,7 @@ export default function Competitors() {
       <div className="panel-head">
         <div>
           <h2>Competitor Price Tracker</h2>
-          <p>Persistent tracking using the backend storage API.</p>
+          <p>Manage competitors, track products, and compare prices dynamically.</p>
         </div>
       </div>
 
@@ -230,7 +288,7 @@ export default function Competitors() {
         </div>
       </div>
 
-      {/*
+      {/* Competitor Management */}
       <div className="split">
         <div className="card-block">
           <h5>Add Competitor</h5>
@@ -254,7 +312,7 @@ export default function Competitors() {
             <label className="form-label mb-1">Currency (ISO code)</label>
             <input
               className="form-control mb-2"
-              placeholder="e.g. USD"
+              placeholder="e.g. KES"
               value={competitorForm.currency}
               onChange={(e) => setCompetitorForm((s) => ({ ...s, currency: e.target.value }))}
               maxLength={3}
@@ -262,6 +320,7 @@ export default function Competitors() {
             <button className="btn btn-primary" type="submit">Add Competitor</button>
           </form>
         </div>
+
         <div className="card-block">
           <h5>Competitors</h5>
           <div className="table-responsive">
@@ -304,7 +363,7 @@ export default function Competitors() {
                             required
                           />
                         ) : (
-                          c.website || "-"
+                          <a href={c.website} target="_blank" rel="noreferrer">{c.website || "-"}</a>
                         )}
                       </td>
                       <td>
@@ -367,10 +426,165 @@ export default function Competitors() {
           </div>
         </div>
       </div>
-      */}
 
+      {/* Product Management */}
+      <div className="card-block mt-3">
+        <h5>Add Product to Track</h5>
+        <form onSubmit={onAddProduct}>
+          <div className="row">
+            <div className="col-md-3">
+              <label className="form-label mb-1">Competitor</label>
+              <select
+                className="form-control mb-2"
+                value={productForm.competitor_id}
+                onChange={(e) => setProductForm((s) => ({ ...s, competitor_id: e.target.value }))}
+                required
+              >
+                <option value="">Select competitor...</option>
+                {competitors.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="col-md-3">
+              <label className="form-label mb-1">Product Name</label>
+              <input
+                className="form-control mb-2"
+                placeholder="e.g. Red Bodycon Dress"
+                value={productForm.product_name}
+                onChange={(e) => setProductForm((s) => ({ ...s, product_name: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="col-md-2">
+              <label className="form-label mb-1">Category</label>
+              <input
+                className="form-control mb-2"
+                placeholder="e.g. Dresses"
+                value={productForm.category}
+                onChange={(e) => setProductForm((s) => ({ ...s, category: e.target.value }))}
+              />
+            </div>
+            <div className="col-md-3">
+              <label className="form-label mb-1">Product URL</label>
+              <input
+                className="form-control mb-2"
+                placeholder="https://..."
+                value={productForm.product_url}
+                onChange={(e) => setProductForm((s) => ({ ...s, product_url: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="col-md-1">
+              <label className="form-label mb-1">Currency</label>
+              <input
+                className="form-control mb-2"
+                placeholder="KES"
+                value={productForm.currency}
+                onChange={(e) => setProductForm((s) => ({ ...s, currency: e.target.value }))}
+                maxLength={3}
+              />
+            </div>
+          </div>
+          <button className="btn btn-primary" type="submit">Add Product</button>
+        </form>
+      </div>
 
-      {/*
+      {/* Tracked Products */}
+      <div className="table-responsive mt-3">
+        <div className="d-flex justify-content-between align-items-center mb-2">
+          <h5>Tracked Products</h5>
+          <button 
+            className="btn btn-success btn-sm" 
+            onClick={onScrapeAll}
+            disabled={scrapeAllLoading || !products.length}
+          >
+            {scrapeAllLoading ? "Scraping All..." : "Scrape All Products"}
+          </button>
+        </div>
+        {scrapeProductMessage && <div className="alert alert-success">{scrapeProductMessage}</div>}
+        <table className="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Category</th>
+              <th>Competitor</th>
+              <th>Latest Price</th>
+              <th>Last Collected</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {products.map((p) => (
+              <tr key={p.id}>
+                <td>
+                  <a href={p.product_url} target="_blank" rel="noreferrer">{p.product_name}</a>
+                </td>
+                <td>{p.category}</td>
+                <td>{p.competitor_name}</td>
+                <td>{formatPrice(p.latest_price, p.currency || p.competitor_currency || "KES")}</td>
+                <td>{p.latest_collected_at ? new Date(p.latest_collected_at).toLocaleString() : "-"}</td>
+                <td className="text-end">
+                  <button className="btn btn-outline-info btn-sm me-1" onClick={() => viewProductHistory(p.id)}>
+                    History
+                  </button>
+                  <button className="btn btn-outline-primary btn-sm" onClick={() => onScrapeProduct(p.id)}>
+                    Scrape
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {!products.length && (
+              <tr>
+                <td colSpan="6" className="text-muted">
+                  No products tracked yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Price History */}
+      {selectedProductHistory && (
+        <div className="card-block mt-3">
+          <div className="d-flex justify-content-between align-items-center mb-2">
+            <h5>Price History: {selectedProductHistory.product.product_name}</h5>
+            <button className="btn btn-sm btn-outline-secondary" onClick={() => setSelectedProductHistory(null)}>Close</button>
+          </div>
+          {historyLoading ? (
+            <div className="alert alert-info">Loading history...</div>
+          ) : selectedProductHistory.points?.length > 0 ? (
+            <>
+              <PriceChart 
+                points={selectedProductHistory.points} 
+                productName={selectedProductHistory.product.product_name}
+                currency={selectedProductHistory.product.currency || selectedProductHistory.product.competitor_currency} 
+              />
+              <table className="table table-sm mt-3">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Price</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedProductHistory.points.map((point) => (
+                    <tr key={point.id}>
+                      <td>{new Date(point.collected_at).toLocaleString()}</td>
+                      <td>{formatPrice(point.price, selectedProductHistory.product.currency || selectedProductHistory.product.competitor_currency)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          ) : (
+            <div className="alert alert-info">No price history available yet.</div>
+          )}
+        </div>
+      )}
+
+      {/* Price Comparison */}
       <div className="card-block mt-3">
         <h5>Price Comparison</h5>
         <div className="row mb-3">
@@ -381,7 +595,7 @@ export default function Competitors() {
               value={comparisonFilters.base_competitor}
               onChange={(e) => setComparisonFilters((s) => ({ ...s, base_competitor: e.target.value }))}
             >
-              <option value="">All competitors</option>
+              <option value="">Select base...</option>
               {competitors.map((c) => (
                 <option key={c.id} value={c.name}>{c.name}</option>
               ))}
@@ -429,9 +643,8 @@ export default function Competitors() {
           </table>
         )}
       </div>
-      */}
 
-      {/*
+      {/* Live Product Compare */}
       <div className="card-block mt-3">
         <h5>Live Product Compare</h5>
         <p className="text-muted">Search for a product across all competitors in real-time.</p>
@@ -455,7 +668,7 @@ export default function Competitors() {
                 onChange={(e) => setLiveCompareForm((s) => ({ ...s, base_competitor: e.target.value }))}
                 required
               >
-                <option value="">All competitors</option>
+                <option value="">Select base...</option>
                 {competitors.map((c) => (
                   <option key={c.id} value={c.name}>{c.name}</option>
                 ))}
@@ -512,8 +725,8 @@ export default function Competitors() {
           </div>
         )}
       </div>
-      */}
 
+      {/* Latest Updates */}
       {summary.latest_updates?.length > 0 && (
         <div className="card-block mt-3">
           <h5>Latest Price Updates</h5>

@@ -184,7 +184,7 @@ export default function SearchPage() {
   const [searchResult, setSearchResult] = useState(null);
   const [searchError, setSearchError] = useState("");
   const [page, setPage] = useState(1);
-  const [pageSize] = useState(30);
+  const [pageSize] = useState(20);
   const [detailView, setDetailView] = useState(false);
   const categoryRef = useRef(null);
 
@@ -236,6 +236,7 @@ export default function SearchPage() {
     return filterItemsForCompetitor(searchResult.data, selectedCompetitor?.name);
   }, [searchResult, searchCompetitorId, selectedCompetitor]);
   const pagedItems = useMemo(() => filteredItems, [filteredItems]);
+  const displayItems = useMemo(() => pagedItems.slice(0, 10), [pagedItems]);
 
   useEffect(() => {
     let active = true;
@@ -267,14 +268,8 @@ export default function SearchPage() {
 
   useEffect(() => {
     if (!searchCompetitorId) return;
-    if (searchResult || searchQuery) return;
     setSearchQuery(subcategory || category);
-  }, [searchCompetitorId]);
-
-  useEffect(() => {
-    if (searchResult || searchQuery) return;
-    setSearchQuery(subcategory || category);
-  }, [category, subcategory]);
+  }, [searchCompetitorId, category, subcategory]);
 
   useEffect(() => {
     if (!routeCompetitorId) {
@@ -312,6 +307,7 @@ export default function SearchPage() {
     setPage(nextPage);
     const effectiveRefresh = persist ? true : refresh;
     const activeCategory = subcategory || category || "";
+    const effectiveQuery = activeCategory || routeQuery || searchQuery || "";
     try {
       if (searchCompetitorId === "all") {
         if (!competitors.length) {
@@ -328,7 +324,7 @@ export default function SearchPage() {
 
         for (const competitor of competitors) {
           try {
-            let payload = await api.searchCompetitor(competitor.id, searchQuery, {
+            let payload = await api.searchCompetitor(competitor.id, effectiveQuery, {
               category: activeCategory,
               persist,
               refresh: effectiveRefresh,
@@ -338,7 +334,7 @@ export default function SearchPage() {
             let items = payload?.data || [];
             if (!items.length && !effectiveRefresh) {
               try {
-                payload = await api.searchCompetitor(competitor.id, searchQuery, {
+                payload = await api.searchCompetitor(competitor.id, effectiveQuery, {
                   category: activeCategory,
                   persist,
                   refresh: true,
@@ -356,7 +352,7 @@ export default function SearchPage() {
                   storedProducts = await api.getProducts();
                 }
                 const fallback = filterStoredProducts(storedProducts, {
-                  query: searchQuery,
+                  query: effectiveQuery,
                   competitorName: competitor?.name,
                 });
                 if (fallback.length) {
@@ -386,7 +382,7 @@ export default function SearchPage() {
         if (combined.data.length === 0) {
           try {
             const stored = await api.getProducts();
-            const fallback = filterStoredProducts(stored, { query: searchQuery });
+            const fallback = filterStoredProducts(stored, { query: effectiveQuery });
             if (fallback.length) {
               combined.data = fallback.map((item) => ({
                 title: item.product_name,
@@ -411,12 +407,12 @@ export default function SearchPage() {
         savePersistedState("search", {
           competitor_id: "all",
           competitor_name: "All competitors",
-          query: searchQuery,
+          query: effectiveQuery,
           result: combined,
           updated_at: new Date().toISOString(),
         });
       } else {
-        const res = await api.searchCompetitor(searchCompetitorId, searchQuery, {
+        const res = await api.searchCompetitor(searchCompetitorId, effectiveQuery, {
           category: activeCategory,
           persist,
           refresh: effectiveRefresh,
@@ -426,7 +422,7 @@ export default function SearchPage() {
         if (!res?.data?.length) {
           if (!effectiveRefresh) {
             try {
-              const refreshed = await api.searchCompetitor(searchCompetitorId, searchQuery, {
+              const refreshed = await api.searchCompetitor(searchCompetitorId, effectiveQuery, {
                 category: activeCategory,
                 persist,
                 refresh: true,
@@ -437,7 +433,7 @@ export default function SearchPage() {
                 setSearchResult(refreshed);
                 savePersistedState("search", {
                   competitor_id: searchCompetitorId,
-                  query: searchQuery,
+                  query: effectiveQuery,
                   result: refreshed,
                   updated_at: new Date().toISOString(),
                 });
@@ -450,7 +446,7 @@ export default function SearchPage() {
           try {
             const stored = await api.getProducts();
             const fallback = filterStoredProducts(stored, {
-              query: searchQuery,
+              query: effectiveQuery,
               competitorName: selectedCompetitor?.name,
             });
             if (fallback.length) {
@@ -472,7 +468,7 @@ export default function SearchPage() {
         setSearchResult(res);
         savePersistedState("search", {
           competitor_id: searchCompetitorId,
-          query: searchQuery,
+          query: effectiveQuery,
           result: res,
           updated_at: new Date().toISOString(),
         });
@@ -501,13 +497,16 @@ export default function SearchPage() {
       (subcategory && categoryLabelMap.get(subcategory)) ||
       (category && categoryLabelMap.get(category)) ||
       (category ? category : "All categories");
+    const activeCategory = subcategory || category || "";
+    const effectiveQuery = activeCategory || routeQuery || searchQuery || "";
     let allItems = searchResult.data || [];
     if (searchCompetitorId !== "all") {
       const collected = [];
       let currentPage = 1;
       let hasMore = true;
       while (hasMore) {
-        const payload = await api.searchCompetitor(searchCompetitorId, searchQuery, {
+        const payload = await api.searchCompetitor(searchCompetitorId, effectiveQuery, {
+          category: activeCategory,
           persist: false,
           refresh: false,
           page: currentPage,
@@ -543,7 +542,7 @@ export default function SearchPage() {
           <h2>{detailView ? "Full Search Results" : "Shopify Search Console"}</h2>
           {detailView ? (
             <p>
-              {selectedCompetitor?.name || "Competitor"} results for <strong>{searchQuery || routeQuery || "search"}</strong>
+              {selectedCompetitor?.name || "Competitor"} results for <strong>{(subcategory || category || routeQuery || searchQuery || "search")}</strong>
             </p>
           ) : (
             <p>Search any competitor that you have added in the tracker.</p>
@@ -645,8 +644,8 @@ export default function SearchPage() {
         </select>
         <input
           className="form-control"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          value={subcategory || category || ""}
+          readOnly
           placeholder="Search keyword or category"
           required
         />
@@ -663,7 +662,7 @@ export default function SearchPage() {
               onClick={() => runSearch({ persist: true, refresh: true, nextPage: 1 })}
               disabled={searchLoading || !searchCompetitorId}
             >
-              Refresh
+              Fresh Scrape
             </button>
         </form>
       )}
@@ -683,7 +682,7 @@ export default function SearchPage() {
             <>
               <div className="table-actions">
                 <div className="muted">
-                  Showing {pagedItems.length} of {(filteredItems.length) || 0} items
+                  Showing {displayItems.length} of {(filteredItems.length) || 0} items
                 </div>
                 {(filteredItems.length || 0) > pageSize && (
                   <div className="pager">
@@ -719,7 +718,7 @@ export default function SearchPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {pagedItems.map((item, idx) => {
+                    {displayItems.map((item, idx) => {
                       const imageUrl = resolveImage(item);
                   const displayCurrency = resolveCurrency(item, competitorByName, defaultCurrency);
                   const displayTitle = resolveTitle(item);
@@ -772,7 +771,7 @@ export default function SearchPage() {
                     <div className="competitor-header">
                       <div>
                         <div className="competitor-title">{group.brand}</div>
-                        <div className="competitor-meta">{group.items.length} results</div>
+                        <div className="competitor-meta">{visibleItems.length} results</div>
                       </div>
                       {viewMorePath && group.items.length > 10 && (
                         <Link className="btn btn-outline-primary btn-sm" to={viewMorePath}>
@@ -829,7 +828,7 @@ export default function SearchPage() {
               <div className="table-actions">
                 <div>
                   <strong>{selectedCompetitor?.name || "Competitor"} results</strong>
-                  <div className="muted">{filteredItems.length} items found</div>
+                  <div className="muted">{Math.min(10, filteredItems.length)} items found</div>
                 </div>
                 {filteredItems.length > 10 && searchCompetitorId && (
                   <Link
