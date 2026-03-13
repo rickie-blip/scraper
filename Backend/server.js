@@ -4,6 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { load } from "cheerio";
 import dotenv from "dotenv";
+import { Pool } from "pg";
 import { scrapeCollection } from "./scraper.js";
 
 dotenv.config();
@@ -22,6 +23,7 @@ const PORT = process.env.PORT || 5000;
 const LANGFLOW_HOST = process.env.LANGFLOW_HOST || "";
 const LANGFLOW_FLOW_ID = process.env.LANGFLOW_FLOW_ID || "";
 const LANGFLOW_API_KEY = process.env.LANGFLOW_API_KEY || "";
+const DATABASE_URL = process.env.DATABASE_URL || "";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const IS_VERCEL = Boolean(process.env.VERCEL);
@@ -42,6 +44,39 @@ const DEFAULT_COMPETITORS = [
   { name: "Neviive", website: "https://neviive.com", currency: BRAND_CURRENCY.Neviive },
   { name: "Diracfashion", website: "https://diracfashion.com", currency: BRAND_CURRENCY.Diracfashion },
 ];
+
+const USE_DB = Boolean(DATABASE_URL);
+let dbPool = null;
+
+function getDbPool() {
+  if (!USE_DB) return null;
+  if (!dbPool) {
+    dbPool = new Pool({
+      connectionString: DATABASE_URL,
+      ssl: process.env.VERCEL ? { rejectUnauthorized: false } : undefined,
+    });
+  }
+  return dbPool;
+}
+
+function buildInitialStore(sourceCompetitors) {
+  const seededCompetitors = sourceCompetitors.map((c, idx) => ({
+    id: idx + 1,
+    name: c.name,
+    website: c.website,
+    currency: c.currency || null,
+    website_aliases: c.website_aliases,
+    created_at: new Date().toISOString(),
+  }));
+  return {
+    competitors: seededCompetitors,
+    products: [],
+    history: [],
+    counters: { competitor: seededCompetitors.length + 1, product: 1, history: 1 },
+    dashboard: {},
+    seeded: true,
+  };
+}
 
 function loadCompetitorsFromEnv() {
   const raw = process.env.COMPETITORS_JSON;
@@ -131,46 +166,63 @@ function pruneStore(store, daysToKeep = 7) {
 }
 
 async function ensureStore() {
+  if (USE_DB) {
+    const pool = getDbPool();
+    await pool.query(
+      "CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value JSONB NOT NULL)"
+    );
+    const existing = await pool.query("SELECT value FROM app_state WHERE key = $1", [
+      "store",
+    ]);
+    if (!existing.rows.length) {
+      const envCompetitors = loadCompetitorsFromEnv();
+      const sourceCompetitors = envCompetitors || DEFAULT_COMPETITORS;
+      const initial = buildInitialStore(sourceCompetitors);
+      await pool.query("INSERT INTO app_state (key, value) VALUES ($1, $2)", [
+        "store",
+        initial,
+      ]);
+    }
+    return;
+  }
+
   try {
     await fs.access(DATA_FILE);
   } catch {
     await fs.mkdir(DATA_DIR, { recursive: true });
     const envCompetitors = loadCompetitorsFromEnv();
     const sourceCompetitors = envCompetitors || DEFAULT_COMPETITORS;
-    const seededCompetitors = sourceCompetitors.map((c, idx) => ({
-      id: idx + 1,
-      name: c.name,
-      website: c.website,
-      currency: c.currency || null,
-      website_aliases: c.website_aliases,
-      created_at: new Date().toISOString(),
-    }));
-    const initial = {
-      competitors: seededCompetitors,
-      products: [],
-      history: [],
-      counters: { competitor: seededCompetitors.length + 1, product: 1, history: 1 },
-      dashboard: {},
-      seeded: true,
-    };
+    const initial = buildInitialStore(sourceCompetitors);
     await fs.writeFile(DATA_FILE, JSON.stringify(initial, null, 2), "utf-8");
   }
 }
 
 async function readStore() {
   await ensureStore();
-  let raw = await fs.readFile(DATA_FILE, "utf-8");
   let store;
-  try {
-    store = JSON.parse(raw);
-  } catch (err) {
-    const backupPath = `${DATA_FILE}.bak`;
+  if (USE_DB) {
+    const pool = getDbPool();
+    const result = await pool.query("SELECT value FROM app_state WHERE key = $1", ["store"]);
+    store = result.rows?.[0]?.value || null;
+    if (!store || typeof store !== "object") {
+      const envCompetitors = loadCompetitorsFromEnv();
+      const sourceCompetitors = envCompetitors || DEFAULT_COMPETITORS;
+      store = buildInitialStore(sourceCompetitors);
+      await writeStore(store);
+    }
+  } else {
+    let raw = await fs.readFile(DATA_FILE, "utf-8");
     try {
-      const backup = await fs.readFile(backupPath, "utf-8");
-      store = JSON.parse(backup);
-      await fs.writeFile(DATA_FILE, backup, "utf-8");
-    } catch {
-      throw err;
+      store = JSON.parse(raw);
+    } catch (err) {
+      const backupPath = `${DATA_FILE}.bak`;
+      try {
+        const backup = await fs.readFile(backupPath, "utf-8");
+        store = JSON.parse(backup);
+        await fs.writeFile(DATA_FILE, backup, "utf-8");
+      } catch {
+        throw err;
+      }
     }
   }
   if (!store.dashboard || typeof store.dashboard !== "object") {
@@ -217,6 +269,15 @@ async function loadCollectionOverrides() {
 }
 
 async function writeStore(store) {
+  if (USE_DB) {
+    const pool = getDbPool();
+    await pool.query(
+      "INSERT INTO app_state (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+      ["store", store]
+    );
+    return;
+  }
+
   const tmpPath = `${DATA_FILE}.tmp`;
   const backupPath = `${DATA_FILE}.bak`;
   const payload = JSON.stringify(store, null, 2);
