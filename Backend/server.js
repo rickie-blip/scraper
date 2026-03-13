@@ -897,6 +897,8 @@ const fxCache = {
 const SEARCH_CACHE_TTL_MS = 10 * 60 * 1000;
 const SEARCH_PAGE_SIZE_DEFAULT = 20;
 const SEARCH_PAGE_SIZE_MAX = 20;
+const SEARCH_TIME_BUDGET_MS = 45 * 1000;
+const SEARCH_IMAGE_ENRICH_LIMIT = 12;
 const searchCache = new Map();
 
 async function fetchFxRatesToKes(currencies = []) {
@@ -2026,10 +2028,22 @@ app.delete("/api/competitors/:id", async (req, res) => {
 });
 
 app.get("/api/competitors/:id/search", async (req, res) => {
+  let respondWithCache = null;
   try {
     const queryValue = String(req.query.q || req.query.query || "").trim();
     const categoryParam = String(req.query.category || "").trim();
     const effectiveQuery = categoryParam || queryValue;
+
+    const startedAt = Date.now();
+    const deadlineAt = startedAt + SEARCH_TIME_BUDGET_MS;
+    let timeBudgetHit = false;
+    function shouldStop() {
+      if (Date.now() > deadlineAt) {
+        timeBudgetHit = true;
+        return true;
+      }
+      return false;
+    }
 
     const store = await readStore();
     const competitor = store.competitors.find(
@@ -2067,21 +2081,53 @@ app.get("/api/competitors/:id/search", async (req, res) => {
     }
 
     const storeCache = store.dashboard?.search_cache?.[cacheKey];
-    if (!shouldRefresh) {
+
+    const productImageByUrl = new Map(
+      (store.products || [])
+        .filter((p) => p && p.product_url && p.image)
+        .map((p) => [String(p.product_url).split("?")[0], p.image])
+    );
+
+    function hydrateImagesFromStore(items) {
+      if (!Array.isArray(items) || !items.length) return;
+      for (const item of items) {
+        if (!item || item.image) continue;
+        const url = item.url || item.product_url;
+        if (!url) continue;
+        const key = String(url).split("?")[0];
+        const image = productImageByUrl.get(key);
+        if (image) item.image = image;
+      }
+    }
+
+    function buildCachedPayload(entry) {
+      if (!entry || !Array.isArray(entry.data)) return null;
+      hydrateImagesFromStore(entry.data);
+      return {
+        success: true,
+        count: entry.data.length,
+        data: entry.data,
+        competitor: { id: competitor.id, name: competitor.name },
+        persisted: entry.persisted || { created: 0, updated: 0, history: 0 },
+      };
+    }
+
+    respondWithCache = (reason = "cache") => {
       if (cached && Date.now() - cached.at < SEARCH_CACHE_TTL_MS) {
         return res.status(200).json(buildPagedResponse(cached.payload));
       }
       if (storeCache && Date.now() - storeCache.at < SEARCH_CACHE_TTL_MS) {
-        const payload = {
-          success: true,
-          count: storeCache.data.length,
-          data: storeCache.data,
-          competitor: { id: competitor.id, name: competitor.name },
-          persisted: storeCache.persisted || { created: 0, updated: 0, history: 0 },
-        };
-        searchCache.set(cacheKey, { at: storeCache.at, payload });
-        return res.status(200).json(buildPagedResponse(payload));
+        const payload = buildCachedPayload(storeCache);
+        if (payload) {
+          searchCache.set(cacheKey, { at: storeCache.at, payload });
+          return res.status(200).json(buildPagedResponse(payload));
+        }
       }
+      return null;
+    };
+    if (!shouldRefresh) {
+      const cachedResponse = respondWithCache();
+      if (cachedResponse) return cachedResponse;
     }
 
     const products = [];
@@ -2112,12 +2158,14 @@ app.get("/api/competitors/:id/search", async (req, res) => {
 
     try {
       for (const website of websites) {
+        if (shouldStop()) break;
         const overrideCandidates = effectiveQuery
           ? expandCollectionCandidates(
               buildOverrideCandidates(website, competitor.name, effectiveQuery, overrides)
             )
           : [];
         for (const candidate of overrideCandidates) {
+          if (shouldStop()) break;
           try {
             const found = await scrapeShopifyCollection(candidate, competitor.currency);
             addProducts(found);
@@ -2127,6 +2175,7 @@ app.get("/api/competitors/:id/search", async (req, res) => {
         }
 
         for (const candidate of overrideCandidates) {
+          if (shouldStop()) break;
           try {
             const found = await scrapeCollectionHtml(candidate);
             addProducts(found);
@@ -2139,6 +2188,7 @@ app.get("/api/competitors/:id/search", async (req, res) => {
           ? expandCollectionCandidates(buildCollectionCandidates(website, effectiveQuery))
           : [];
         for (const candidate of collectionCandidates) {
+          if (shouldStop()) break;
           try {
             const found = await scrapeShopifyCollection(candidate, competitor.currency);
             addProducts(found);
@@ -2148,6 +2198,7 @@ app.get("/api/competitors/:id/search", async (req, res) => {
         }
 
         for (const candidate of collectionCandidates) {
+          if (shouldStop()) break;
           try {
             const found = await scrapeCollectionHtml(candidate);
             addProducts(found);
@@ -2161,6 +2212,7 @@ app.get("/api/competitors/:id/search", async (req, res) => {
           : [];
         const discoveredCandidates = expandCollectionCandidates(discoveredCollections);
         for (const candidate of discoveredCandidates) {
+          if (shouldStop()) break;
           try {
             const found = await scrapeShopifyCollection(candidate, competitor.currency);
             addProducts(found);
@@ -2170,6 +2222,7 @@ app.get("/api/competitors/:id/search", async (req, res) => {
         }
 
         for (const candidate of discoveredCandidates) {
+          if (shouldStop()) break;
           try {
             const found = await scrapeCollectionHtml(candidate);
             addProducts(found);
@@ -2179,6 +2232,7 @@ app.get("/api/competitors/:id/search", async (req, res) => {
         }
 
         for (const variant of queryVariants) {
+          if (shouldStop()) break;
           try {
             const foundShopify = await shopifySearchProducts(website, variant);
             addProducts(foundShopify);
@@ -2198,6 +2252,11 @@ app.get("/api/competitors/:id/search", async (req, res) => {
       scrapeError = err;
     }
 
+    if (timeBudgetHit) {
+      const cachedResponse = respondWithCache("timeout");
+      if (cachedResponse) return cachedResponse;
+    }
+
     if (!products.length) {
       const stored = buildStoredSearchResults(
         store,
@@ -2211,6 +2270,7 @@ app.get("/api/competitors/:id/search", async (req, res) => {
     if (products.length < maxResults) {
       const fallbackPages = 2;
       for (const website of websites) {
+        if (shouldStop()) break;
         try {
           const fallback = await scrapeShopifyAllProducts(
             website,
@@ -2223,6 +2283,11 @@ app.get("/api/competitors/:id/search", async (req, res) => {
           // ignore fallback errors
         }
       }
+    }
+
+    if (timeBudgetHit) {
+      const cachedResponse = respondWithCache("timeout");
+      if (cachedResponse) return cachedResponse;
     }
 
     const storeCurrency = await fetchShopCurrency(competitor.website);
@@ -2251,18 +2316,25 @@ app.get("/api/competitors/:id/search", async (req, res) => {
 
     const missingImages = filteredData.filter((item) => !item.image && item.url);
     if (missingImages.length) {
-      const limit = missingImages.slice(0, 25);
-      await Promise.all(
-        limit.map(async (item) => {
-          let img = null;
-          if (isCollectionUrl(item.url)) {
-            img = await fetchCollectionImage(item.url);
-          } else if (isProductUrl(item.url)) {
-            img = await fetchProductImage(item.url);
-          }
-          if (img) item.image = img;
-        })
-      );
+      hydrateImagesFromStore(missingImages);
+    }
+
+    const stillMissingImages = filteredData.filter((item) => !item.image && item.url);
+    if (stillMissingImages.length) {
+      const limit = stillMissingImages.slice(0, SEARCH_IMAGE_ENRICH_LIMIT);
+      if (!shouldStop()) {
+        await Promise.all(
+          limit.map(async (item) => {
+            let img = null;
+            if (isCollectionUrl(item.url)) {
+              img = await fetchCollectionImage(item.url);
+            } else if (isProductUrl(item.url)) {
+              img = await fetchProductImage(item.url);
+            }
+            if (img) item.image = img;
+          })
+        );
+      }
     }
 
     let persisted = { created: 0, updated: 0, history: 0 };
@@ -2371,6 +2443,14 @@ app.get("/api/competitors/:id/search", async (req, res) => {
 
     res.status(200).json(buildPagedResponse(responsePayload));
   } catch (error) {
+    if (respondWithCache) {
+      try {
+        const cachedResponse = respondWithCache("error");
+        if (cachedResponse) return cachedResponse;
+      } catch {
+        // ignore cache fallback errors
+      }
+    }
     res.status(500).json({ error: error.message });
   }
 });

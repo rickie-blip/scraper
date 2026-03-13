@@ -4,6 +4,7 @@ const PUBLIC_BASE = import.meta.env.VITE_PUBLIC_BASE || "";
 async function request(base, path, options = {}) {
   const res = await fetch(`${base}${path}`, {
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    cache: "no-store",
     ...options,
   });
 
