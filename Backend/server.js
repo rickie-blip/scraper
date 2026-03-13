@@ -1798,6 +1798,41 @@ app.post("/api/admin/import-store", async (req, res) => {
   }
 });
 
+app.get("/api/admin/db-status", async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    if (!USE_DB) {
+      return res.status(200).json({
+        ok: true,
+        use_db: false,
+        database_url_set: false,
+        message: "DATABASE_URL is not configured. Using JSON file storage.",
+      });
+    }
+
+    const pool = getDbPool();
+    await ensureDbSchema(pool);
+    const tablesRes = await pool.query(
+      `
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+        ORDER BY table_name
+      `
+    );
+    const tables = tablesRes.rows.map((row) => row.table_name);
+    return res.status(200).json({
+      ok: true,
+      use_db: true,
+      database_url_set: true,
+      tables,
+      table_count: tables.length,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get("/api/dashboard/state", async (req, res) => {
   try {
     const store = await readStore();
