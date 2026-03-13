@@ -22107,11 +22107,11 @@
         "data": [],
         "failed": []
       },
-      "updated_at": "2026-03-13T11:40:07.434Z"
+      "updated_at": "2026-03-13T11:59:01.482Z"
     },
     "search_cache": {
       "1:dresses": {
-        "at": 1773401903493,
+        "at": 1773403032609,
         "data": [],
         "persisted": {
           "created": 0,
@@ -22120,7 +22120,7 @@
         }
       },
       "4:dresses": {
-        "at": 1773401972053,
+        "at": 1773403103234,
         "data": [],
         "persisted": {
           "created": 0,
@@ -22129,7 +22129,7 @@
         }
       },
       "5:dresses": {
-        "at": 1773402007434,
+        "at": 1773403141482,
         "data": [],
         "persisted": {
           "created": 0,
@@ -22138,39 +22138,16 @@
         }
       },
       "6:dresses": {
-        "at": 1773401153149,
-        "data": [
-          {
-            "title": "<img loading=\"lazy\" class=\"rimage__image\" src=\"//www.ikojn.com/cdn/shop/files/WQP1538_1024x1024.jpg?v=1771842671\" alt=\"\"> New in",
-            "price": null,
-            "currency": "KES",
-            "image": "https://www.ikojn.com/cdn/shop/files/WQP1538_%7Bwidth%7Dx.jpg?v=1771842671",
-            "url": "https://www.ikojn.com/collections/dresses/products/dynasty-shift-dress-in-thalia",
-            "brand": "ikojn",
-            "compareAtPrice": null,
-            "original_currency": null,
-            "original_price": null
-          },
-          {
-            "title": "<img loading=\"lazy\" class=\"rimage__image\" src=\"//www.ikojn.com/cdn/shop/files/WQP1546-Edit_1_1024x1024.jpg?v=1771842935\" alt=\"\">",
-            "price": null,
-            "currency": "KES",
-            "image": "https://www.ikojn.com/cdn/shop/files/WQP1546-Edit_1_%7Bwidth%7Dx.jpg?v=1771842935",
-            "url": "https://www.ikojn.com/collections/dresses/products/kivuli-shirt-dress",
-            "brand": "ikojn",
-            "compareAtPrice": null,
-            "original_currency": null,
-            "original_price": null
-          }
-        ],
+        "at": 1773402028269,
+        "data": [],
         "persisted": {
           "created": 0,
-          "updated": 2,
+          "updated": 0,
           "history": 0
         }
       },
       "2:dresses": {
-        "at": 1773401916772,
+        "at": 1773403046705,
         "data": [],
         "persisted": {
           "created": 0,
@@ -22179,7 +22156,7 @@
         }
       },
       "3:dresses": {
-        "at": 1773401952339,
+        "at": 1773403082323,
         "data": [],
         "persisted": {
           "created": 0,

@@ -215,6 +215,8 @@ async function loadStoreFromDb(pool) {
 async function saveStoreToDb(pool, store) {
   const client = await pool.connect();
   try {
+    await ensureDynamicSchemaFromStore(client, store);
+    const dynamicColumns = collectDynamicColumns(store);
     await client.query("BEGIN");
     await client.query("DELETE FROM history");
     await client.query("DELETE FROM products");
@@ -222,55 +224,84 @@ async function saveStoreToDb(pool, store) {
     await client.query("DELETE FROM dashboard_state");
     await client.query("DELETE FROM counters");
 
+    const competitorDynCols = Array.from(dynamicColumns.competitors.keys());
+    const competitorColumns = [
+      "id",
+      "name",
+      "website",
+      "currency",
+      "website_aliases",
+      "search_presets",
+      "created_at",
+      "updated_at",
+      ...competitorDynCols,
+    ];
     for (const competitor of store.competitors || []) {
+      const values = [
+        competitor.id,
+        competitor.name,
+        competitor.website,
+        competitor.currency,
+        competitor.website_aliases || null,
+        competitor.search_presets || null,
+        competitor.created_at ? new Date(competitor.created_at) : null,
+        competitor.updated_at ? new Date(competitor.updated_at) : null,
+        ...competitorDynCols.map((key) => competitor?.[key] ?? null),
+      ];
+      const placeholders = competitorColumns.map((_, idx) => `$${idx + 1}`).join(",");
+      const colsSql = competitorColumns.map((c) => `"${c}"`).join(",");
       await client.query(
-        `INSERT INTO competitors
-          (id, name, website, currency, website_aliases, search_presets, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [
-          competitor.id,
-          competitor.name,
-          competitor.website,
-          competitor.currency,
-          competitor.website_aliases || null,
-          competitor.search_presets || null,
-          competitor.created_at ? new Date(competitor.created_at) : null,
-          competitor.updated_at ? new Date(competitor.updated_at) : null,
-        ]
+        `INSERT INTO competitors (${colsSql}) VALUES (${placeholders})`,
+        values
       );
     }
 
+    const productDynCols = Array.from(dynamicColumns.products.keys());
+    const productColumns = [
+      "id",
+      "competitor_id",
+      "competitor_name",
+      "product_name",
+      "category",
+      "product_url",
+      "image",
+      "currency",
+      "latest_price",
+      "latest_collected_at",
+      ...productDynCols,
+    ];
     for (const product of store.products || []) {
-      await client.query(
-        `INSERT INTO products
-          (id, competitor_id, competitor_name, product_name, category, product_url, image, currency, latest_price, latest_collected_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-        [
-          product.id,
-          product.competitor_id,
-          product.competitor_name,
-          product.product_name,
-          product.category,
-          product.product_url,
-          product.image,
-          product.currency,
-          product.latest_price,
-          product.latest_collected_at ? new Date(product.latest_collected_at) : null,
-        ]
-      );
+      const values = [
+        product.id,
+        product.competitor_id,
+        product.competitor_name,
+        product.product_name,
+        product.category,
+        product.product_url,
+        product.image,
+        product.currency,
+        product.latest_price,
+        product.latest_collected_at ? new Date(product.latest_collected_at) : null,
+        ...productDynCols.map((key) => product?.[key] ?? null),
+      ];
+      const placeholders = productColumns.map((_, idx) => `$${idx + 1}`).join(",");
+      const colsSql = productColumns.map((c) => `"${c}"`).join(",");
+      await client.query(`INSERT INTO products (${colsSql}) VALUES (${placeholders})`, values);
     }
 
+    const historyDynCols = Array.from(dynamicColumns.history.keys());
+    const historyColumns = ["id", "product_id", "price", "collected_at", ...historyDynCols];
     for (const entry of store.history || []) {
-      await client.query(
-        `INSERT INTO history (id, product_id, price, collected_at)
-         VALUES ($1,$2,$3,$4)`,
-        [
-          entry.id,
-          entry.product_id,
-          entry.price,
-          entry.collected_at ? new Date(entry.collected_at) : null,
-        ]
-      );
+      const values = [
+        entry.id,
+        entry.product_id,
+        entry.price,
+        entry.collected_at ? new Date(entry.collected_at) : null,
+        ...historyDynCols.map((key) => entry?.[key] ?? null),
+      ];
+      const placeholders = historyColumns.map((_, idx) => `$${idx + 1}`).join(",");
+      const colsSql = historyColumns.map((c) => `"${c}"`).join(",");
+      await client.query(`INSERT INTO history (${colsSql}) VALUES (${placeholders})`, values);
     }
 
     for (const [key, value] of Object.entries(store.dashboard || {})) {
@@ -376,6 +407,127 @@ function sanitizeStoreForImport(store) {
     products: sanitizedProducts,
     history: sanitizedHistory,
   };
+}
+
+const BASE_DB_COLUMNS = {
+  competitors: new Set([
+    "id",
+    "name",
+    "website",
+    "currency",
+    "website_aliases",
+    "search_presets",
+    "created_at",
+    "updated_at",
+  ]),
+  products: new Set([
+    "id",
+    "competitor_id",
+    "competitor_name",
+    "product_name",
+    "category",
+    "product_url",
+    "image",
+    "currency",
+    "latest_price",
+    "latest_collected_at",
+  ]),
+  history: new Set(["id", "product_id", "price", "collected_at"]),
+};
+
+function isSafeDbIdentifier(key) {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(key);
+}
+
+function inferPgType(value) {
+  if (value == null) return "TEXT";
+  if (Array.isArray(value)) return "JSONB";
+  const t = typeof value;
+  if (t === "number") return "NUMERIC";
+  if (t === "boolean") return "BOOLEAN";
+  if (t === "object") return "JSONB";
+  return "TEXT";
+}
+
+function mergePgTypes(a, b) {
+  if (!a) return b;
+  if (a === b) return a;
+  if (a === "JSONB" || b === "JSONB") return "JSONB";
+  if (a === "TEXT" || b === "TEXT") return "TEXT";
+  return "TEXT";
+}
+
+function collectDynamicColumns(store) {
+  const result = {
+    competitors: new Map(),
+    products: new Map(),
+    history: new Map(),
+  };
+  const sources = [
+    ["competitors", store.competitors],
+    ["products", store.products],
+    ["history", store.history],
+  ];
+  for (const [table, rows] of sources) {
+    if (!Array.isArray(rows)) continue;
+    for (const row of rows) {
+      if (!row || typeof row !== "object") continue;
+      for (const [key, value] of Object.entries(row)) {
+        if (BASE_DB_COLUMNS[table].has(key)) continue;
+        if (!isSafeDbIdentifier(key)) continue;
+        const current = result[table].get(key);
+        const nextType = inferPgType(value);
+        result[table].set(key, mergePgTypes(current, nextType));
+      }
+    }
+  }
+  return result;
+}
+
+async function getExistingColumns(pool, table) {
+  const res = await pool.query(
+    `
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = $1
+    `,
+    [table]
+  );
+  return new Set(res.rows.map((row) => String(row.column_name).toLowerCase()));
+}
+
+async function ensureDynamicColumns(pool, table, columns) {
+  if (!columns || columns.size === 0) return;
+  const existing = await getExistingColumns(pool, table);
+  for (const [name, type] of columns.entries()) {
+    const lower = name.toLowerCase();
+    if (existing.has(lower)) continue;
+    await pool.query(`ALTER TABLE ${table} ADD COLUMN "${name}" ${type}`);
+  }
+}
+
+async function ensureDynamicSchemaFromStore(pool, store) {
+  if (!store || typeof store !== "object") return;
+  const dynamic = collectDynamicColumns(store);
+  await ensureDynamicColumns(pool, "competitors", dynamic.competitors);
+  await ensureDynamicColumns(pool, "products", dynamic.products);
+  await ensureDynamicColumns(pool, "history", dynamic.history);
+}
+
+async function loadStoreFromDiskIfPresent() {
+  try {
+    await fs.access(DATA_FILE);
+  } catch {
+    return null;
+  }
+  try {
+    const raw = await fs.readFile(DATA_FILE, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    return sanitizeStoreForImport(parsed);
+  } catch {
+    return null;
+  }
 }
 
 function buildInitialStore(sourceCompetitors) {
@@ -488,14 +640,22 @@ async function ensureStore() {
   if (USE_DB) {
     const pool = getDbPool();
     await ensureDbSchema(pool);
+    const storeFromDisk = await loadStoreFromDiskIfPresent();
+    if (storeFromDisk) {
+      await ensureDynamicSchemaFromStore(pool, storeFromDisk);
+    }
     const hasData = await hasAnyRows(pool, "competitors");
     if (!hasData) {
       const migrated = await migrateAppStateToDbIfNeeded(pool);
       if (!migrated) {
-        const envCompetitors = loadCompetitorsFromEnv();
-        const sourceCompetitors = envCompetitors || DEFAULT_COMPETITORS;
-        const initial = buildInitialStore(sourceCompetitors);
-        await saveStoreToDb(pool, initial);
+        if (storeFromDisk) {
+          await saveStoreToDb(pool, storeFromDisk);
+        } else {
+          const envCompetitors = loadCompetitorsFromEnv();
+          const sourceCompetitors = envCompetitors || DEFAULT_COMPETITORS;
+          const initial = buildInitialStore(sourceCompetitors);
+          await saveStoreToDb(pool, initial);
+        }
       }
     }
     return;
