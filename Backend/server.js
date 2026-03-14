@@ -2805,7 +2805,7 @@ app.get("/search-vivo-bodycons", async (req, res) => {
         title: p.title,
         price: Number(p.price), // convert cents to base currency
         image: p.image,
-        url: "https://shopzetu.com" + p.url,
+        url: "https://pay.shopzetu.com" + p.url,
         brand,
         currency,
       })) || [];
@@ -2995,7 +2995,7 @@ app.get("/search-vivo-bodysuits", async (req, res) => {
         title: p.title,
         price: normalizeMoney(p.price),
         image: p.image,
-        url: "https://shopzetu.com" + p.url,
+        url: "https://pay.shopzetu.com" + p.url,
         brand,
         currency,
       })) || [];
@@ -3186,7 +3186,7 @@ app.get("/search-vivo-dresses", async (req, res) => {
         title: p.title,
         price: normalizeMoney(p.price),
         image: p.image,
-        url: "https://shopzetu.com" + p.url,
+        url: "https://pay.shopzetu.com" + p.url,
         brand,
         currency,
       })) || [];
