@@ -366,7 +366,7 @@ async function sendEmailWithAttachment(filePath) {
     return false;
   }
 
-  const recipients = (process.env.SCRAPER_EMAIL_RECIPIENTS || "nigel@shopzetu.com,patrick@shopzetu.com")
+  const recipients = (process.env.SCRAPER_EMAIL_RECIPIENTS || "Placements@shopzetu.com")
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);

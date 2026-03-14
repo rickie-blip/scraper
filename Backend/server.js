@@ -42,12 +42,7 @@ const BRAND_CURRENCY = {
 const HOST_CURRENCY_OVERRIDES = {
 };
 const DEFAULT_COMPETITORS = [
-  {
-    name: "Vivo",
-    website: "https://pay.shopzetu.com",
-    currency: BRAND_CURRENCY.Vivo,
-    website_aliases: ["https://pay.shopzetu.com/", "https://www.shopzetu.com/"],
-  },
+  {name: "Vivo",website: "https://pay.shopzetu.com",currency: BRAND_CURRENCY.Vivo,},
   { name: "Nalani", website: "https://nalaniwomen.com", currency: BRAND_CURRENCY.Nalani },
   { name: "Neviive", website: "https://neviive.com", currency: BRAND_CURRENCY.Neviive },
   { name: "Diracfashion", website: "https://diracfashion.com", currency: BRAND_CURRENCY.Diracfashion },
