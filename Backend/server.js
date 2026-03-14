@@ -2146,6 +2146,21 @@ app.get("/api/competitors/:id/search", async (req, res) => {
       })
       .filter((item) => isProductUrl(item.url || item.product_url));
     let filteredData = data.filter((item) => matchesQueryItem(item, effectiveQuery));
+    if (effectiveQuery && !filteredData.length && data.length) {
+      const tokens = String(effectiveQuery)
+        .toLowerCase()
+        .split(/\s+/)
+        .map((token) => token.trim())
+        .filter(Boolean);
+      const looseMatches = tokens.length
+        ? data.filter((item) => {
+            const title = String(item?.title || item?.product_name || "").toLowerCase();
+            const url = String(item?.url || item?.product_url || "").toLowerCase();
+            return tokens.some((token) => title.includes(token) || url.includes(token));
+          })
+        : [];
+      filteredData = looseMatches.length ? looseMatches : data;
+    }
     if (String(competitor.name || "").toLowerCase() === "vivo") {
       filteredData = filteredData.filter(isVivoVendorItem);
     }
