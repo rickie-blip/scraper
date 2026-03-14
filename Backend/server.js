@@ -2206,7 +2206,7 @@ app.get("/api/competitors/:id/search", async (req, res) => {
             competitor_id: Number(competitor.id),
             competitor_name: competitor.name,
             product_name: String(item.title || item.product_name || "Unknown"),
-            category: String(query || "General"),
+            category: String(effectiveQuery || "General"),
             product_url: String(productUrl),
             image:
               item.image ||
